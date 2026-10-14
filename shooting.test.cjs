@@ -27,7 +27,11 @@ const context = vm.createContext({
     requestAnimationFrame() {},
 });
 const run = source => vm.runInContext(source, context);
-run(fs.readFileSync(path.join(__dirname, 'shooting.js'), 'utf8'));
+// 실제 페이지와 동일한 파일 및 순서로 로드한다.
+const page = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+for (const [, src] of page.matchAll(/<script src="([^"]+)"><\/script>/g)) {
+    run(fs.readFileSync(path.join(__dirname, src), 'utf8'));
+}
 run('const originalRandom = Math.random');
 let passed = 0;
 function test(name, check) {
@@ -206,14 +210,14 @@ test('starting shells still one-shot grunts through stage fifty after a weapon s
         assert.equal(run('game.enemies.length'), 0, `stage ${stage}`);
     }
 });
-test('HP stays flat through stage nine then compounds by 1.5% per stage', () => {
+test('HP stays flat through stage nine then compounds by 1.3% per stage', () => {
     for (const [type, base] of [['normal', 8], ['archer', 12], ['boss', 64]]) {
         let previous = 0;
         for (let stage = 1; stage <= 100; stage++) {
             run(`game.stage = ${stage}`);
             const hp = run(`enemyStats('${type}').hp`);
             if (stage < 10) assert.equal(hp, base);
-            else assert.ok(Math.abs(hp / previous - 1.015) < 1e-10);
+            else assert.ok(Math.abs(hp / previous - 1.013) < 1e-10);
             previous = hp;
         }
     }
@@ -377,6 +381,8 @@ test('speed items stack up to sixteen and accelerate both keyboard and touch', (
     }
     assert.ok(Math.abs(distances[1] / distances[0] - 1.48) < 1e-10);
     assert.ok(Math.abs(distances[3] / distances[2] - 1.48) < 1e-10);
+    assert.equal(distances[0], distances[2], 'touch and keyboard have the same base speed');
+    assert.equal(distances[1], distances[3], 'touch and keyboard have the same upgraded speed');
     assert.equal(run('game.weapon.level'), 1);
 });
 test('speed and bomb drop independently without reducing weapon drop chances', () => {
@@ -733,26 +739,27 @@ test('new game clears third-rank abilities and unlock eligibility', () => {
     assert.equal(run('game.shield.cooldown'), 10);
     assert.equal(run('game.companion.cooldown'), 0);
 });
-test('difficulty reaches stage thirty values and final limits at one hundred', () => {
+test('difficulty changes linearly until stage one hundred then stays capped', () => {
     const cases = [
-        ["enemyStats('normal').speed", 100, 180, 210],
-        ["enemyStats('archer').speed", 65, 117, 200],
-        ["enemyStats('boss').speed", 60, 108, 180],
-        ['enemyInterval()', 0.9, 0.34, 0.17],
-        ['bossInterval()', 5, 2.8, 2],
-        ['archerChance()', 0.215, 0.4, 0.4],
-        ['arrowInterval()', 3.72, 1.8, 1.2],
-        ['arrowSpeed()', 252, 370, 500],
+        ["enemyStats('normal').speed", 100, 200],
+        ["enemyStats('archer').speed", 65, 170],
+        ["enemyStats('boss').speed", 60, 150],
+        ['enemyInterval()', 0.9, 0.25],
+        ['bossInterval()', 5, 2, 4],
+        ['archerChance()', 0.215, 0.4],
+        ['arrowInterval()', 3.72, 1.2],
+        ['arrowSpeed()', 252, 500],
     ];
-    for (const [expression, initial, at30, at100] of cases) {
+    for (const [expression, initial, at100, start = 1] of cases) {
         let previous = initial;
         for (let stage = 1; stage <= 101; stage++) {
             run(`game.stage = ${stage}`);
             const actual = run(expression);
             assert.ok((actual - previous) * Math.sign(at100 - initial) >= -1e-10, expression);
             previous = actual;
-            const expected = new Map([[1, initial], [30, at30], [65, (at30 + at100) / 2], [100, at100], [101, at100]]).get(stage);
-            if (expected !== undefined) assert.ok(Math.abs(actual - expected) < 1e-10, `${expression} at ${stage}`);
+            if (stage <= start) assert.equal(actual, initial);
+            else if (stage <= 100) assert.ok(Math.abs(actual - run(`game.stage--; ${expression}`) - (at100 - initial) / (100 - start)) < 1e-10, `${expression} at ${stage}`);
+            else assert.ok(Math.abs(actual - at100) < 1e-10);
         }
         run('game.stage = 500');
         assert.ok(Math.abs(run(expression) - at100) < 1e-10);
@@ -763,9 +770,9 @@ test('late-stage spawn timers and arrow movement use the new difficulty limits',
     run(`game.stage = 100; Math.random = () => 0.39;
         game.enemyCooldown = 0; game.bossCooldown = 0; update(STEP)`);
     assert.equal(run('game.enemies.map(e => e.type).join()'), 'archer,boss');
-    assert.equal(run('game.enemies[0].speed'), 197.8);
-    assert.equal(run('game.enemies[1].speed'), 177.8);
-    assert.ok(Math.abs(run('game.enemyCooldown + STEP') - 0.17) < 1e-10);
+    assert.equal(run('game.enemies[0].speed'), 167.8);
+    assert.equal(run('game.enemies[1].speed'), 147.8);
+    assert.ok(Math.abs(run('game.enemyCooldown + STEP') - 0.25) < 1e-10);
     assert.ok(Math.abs(run('game.bossCooldown + STEP') - 2) < 1e-10);
     run(`Object.assign(game.enemies[0], {y:100, speed:0, shootCooldown:0}); update(STEP)`);
     assert.ok(Math.abs(run('game.enemies[0].shootCooldown') - 1.2) < 1e-10);
@@ -813,6 +820,32 @@ test('smaller tank avoids items beyond its new edge and fires from its center', 
     assert.equal(run('game.weapon.level'), 2);
     run('game.bullets = []; fireWeapon()');
     assert.equal(run('game.bullets[0].x + game.bullets[0].w / 2'), run('game.player.x + game.player.w / 2'));
+});
+test('normal and laser widths grow linearly to seventy percent of their old maximum', () => {
+    for (const [type, first, last] of [['normal', 7, 54.6], ['laser', 6, 60.2]]) {
+        run('game.mastery.normal = 0');
+        const widths = Array.from(run(`WEAPONS.${type}.width`));
+        assert.equal(widths[0], first);
+        assert.ok(Math.abs(widths[9] - last) < 1e-10);
+        for (let i = 1; i < 10; i++) assert.ok(Math.abs(widths[i] - widths[i - 1] - (last - first) / 9) < 1e-10);
+        assert.ok(Math.abs(run(`attackWidth('${type}', 20)`) - last) < 1e-10);
+    }
+});
+test('frame rates from four to 144 fps advance the same simulation time and enemy distance', () => {
+    for (const fps of [4, 5, 10, 30, 60, 120, 144]) {
+        run(`resetGame(); game.enemyCooldown = 1e6; game.bossCooldown = 1e6;
+            Math.random = () => 0.5; Object.assign(spawnEnemy('normal'), {x:0, y:0}); advanceFrame(0)`);
+        for (let frame = 1; frame <= fps; frame++) run(`advanceFrame(${frame * 1000 / fps})`);
+        assert.ok(Math.abs(run('game.time') - 1) < 1e-8, `${fps}fps elapsed time`);
+        assert.ok(Math.abs(run('game.enemies[0].y') - 100) < 1e-8, `${fps}fps distance`);
+    }
+});
+
+test('hidden tab and long stalls do not cause unlimited catch-up', () => {
+    run('advanceFrame(0); advanceFrame(10000)');
+    assert.ok(Math.abs(run('game.time') - 0.25) < 1e-8);
+    run('document.hidden = true; advanceFrame(20000); document.hidden = false; advanceFrame(30000)');
+    assert.ok(Math.abs(run('game.time') - 0.25) < 1e-8);
 });
 console.log(`\n${passed} logic checks passed (no screen validation).`);
 
