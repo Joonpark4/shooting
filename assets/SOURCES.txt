@@ -1,0 +1,15 @@
+Web assets used in Orc Siege
+
+Author: Kenney
+Pack: Tiny Dungeon (1.0)
+Source: https://kenney.nl/assets/tiny-dungeon
+Download: https://kenney.nl/media/pages/assets/tiny-dungeon/f8422efb44-1674742415/kenney_tiny-dungeon.zip
+License: Creative Commons Zero (CC0). Original notice: Kenney-License.txt
+
+archer-orc.png: Tiles/tile_0108.png (green monster)
+bow.png: Tiles/tile_0119.png (bow)
+The game draws these two sprites together as its archer orc.
+Files are unchanged; scaled in Canvas at runtime.
+
+Existing background.jpg, tank.png, orc.png and boss.png are project-provided assets.
+Projectiles, laser beams, item badges, hearts and particles are drawn in Canvas.

@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HTML</title>
+    <title>Orc Siege · Shooting Game</title>
     <style>
         body {
             position: relative;
@@ -32,7 +32,7 @@
         }
 
         .textbox {
-            width: 80px;
+            width: 90px;
             height: 25px;
             font-size: 25px;
             text-align: center;
@@ -83,21 +83,34 @@
 </head>
 
 <body>
-    <h3>Shooting Game!</h3>
+    <h3>Orc Siege · Shooting Game</h3>
     <div class="manual">
         <fieldset>
-            <legend class="title">Game Explain</legend>
-            <p class="text">Tank Control : keyboard <span>&lt;left&gt;</span> and <span>&lt;right&gt;</span> button</p>
-            <p class="text">Tank Shooting : keyboard <span>&lt;Space Bar&gt;</span> button</p>
+            <legend class="title">조작 방법</legend>
+            <p class="text">이동: <span>← / →</span> · 공격: <span>Space 누르기</span></p>
+            <p class="text">모바일: 터치한 채 좌우 이동 · 누르는 동안 공격</p>
+            <p class="text">폭탄: <span>화면 더블 탭 / Space 두 번</span> · 최대 5개 보유</p>
+            <p class="text">다시 시작: 게임 종료 후 <span>Enter / 화면 터치</span></p>
+            <p class="text">화살에 맞거나 적을 놓치면 하트가 줄어듭니다.</p>
+        </fieldset>
+        <fieldset>
+            <legend class="title">보급 아이템</legend>
+            <p class="text">C · 일반 포탄 — 강한 단일 피해, 관통 없음</p>
+            <p class="text">S · 갈래 포탄 — 3발부터 단계마다 1발씩, 최대 12발</p>
+            <p class="text">L · 레이저 포 — 한 줄로 이어지는 관통 지속 공격</p>
+            <p class="text">같은 아이템: 10단계까지 강화 · 다른 종류: 1단계</p>
+            <p class="text">» · 이동속도 — 획득마다 12% 증가, 최대 5회</p>
+            <p class="text">B · 폭탄 — 화면 전체 강력한 피해와 화살 제거</p>
+            <p class="text">♥ · 희귀 하트 — 생명력 증가</p>
         </fieldset>
         <fieldset>
             <legend class="title">Game Information</legend>
-            <p class="text">Enemy Speed : <input type="text" readonly class="textbox" value="0" id="EnemySpeedBox"></p>
-            <p class="text">Enemy Creation Speed : <input type="text" readonly class="textbox" value="0"
-                    id="EnemyCreationSpeedBox"></p>
-            <p class="text">Boss Speed : <input type="text" readonly class="textbox" value="0" id="BossSpeedBox"></p>
-            <p class="text">Boss Creation Speed : <input type="text" readonly class="textbox" value="0"
-                    id="BossCreationSpeedBox"></p>
+            <p class="text"><label>오크 속도 (px/s): <input type="text" readonly class="textbox" value="0" id="EnemySpeedBox"></label></p>
+            <p class="text"><label>오크 생성 간격 (ms): <input type="text" readonly class="textbox" value="0"
+                    id="EnemyCreationSpeedBox"></label></p>
+            <p class="text"><label>보스 속도 (px/s): <input type="text" readonly class="textbox" value="0" id="BossSpeedBox"></label></p>
+            <p class="text"><label>보스 생성 간격 (ms, 4스테이지부터): <input type="text" readonly class="textbox" value="0"
+                    id="BossCreationSpeedBox"></label></p>
         </fieldset>
     </div>
     <div id="dot"></div>
