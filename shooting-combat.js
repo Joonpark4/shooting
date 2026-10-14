@@ -61,7 +61,7 @@ function damageEnemy(enemy, damage) {
 function damagePlayer(escaped = false) {
     const player = game.player;
     if (game.over || (!escaped && player.invulnerable > 0)) return;
-    if (!escaped && game.shield.active) {
+    if (game.shield.active) {
         game.shield.active = false;
         game.shield.cooldown = MASTERY_CONFIG.shieldCooldown;
         player.invulnerable = PLAYER_CONFIG.invulnerability;
@@ -107,6 +107,9 @@ function collectItem(item) {
                 if (item.type === "normal") {
                     game.companion.x = Math.max(0, game.player.x - 42);
                     game.companion.y = game.player.y + 18;
+                } else if (item.type === "laser") {
+                    game.shield.active = true;
+                    game.shield.cooldown = 0;
                 }
             }
         }
@@ -188,7 +191,7 @@ function laserHits(beam, enemy) {
 
 function fireWeapon(companion = false) {
     const type = companion ? "normal" : game.weapon.type;
-    const level = companion ? Math.floor(game.weapon.level * MASTERY_CONFIG.companionLevelRatio) : game.weapon.level;
+    const level = companion ? MASTERY_CONFIG.companionLevel : game.weapon.level;
     if (type === "laser" || level < 1) return;
     const visualLevel = Math.min(level, WEAPON_MILESTONE);
     const count = companion ? 1 : shotCount(type, level);
@@ -236,7 +239,7 @@ function update(dt) {
         companion.x += (targetX - companion.x) * (1 - Math.exp(-8 * dt));
         companion.y = player.y + 18;
         companion.cooldown = Math.max(0, companion.cooldown - dt);
-        if (isFiring() && companion.cooldown === 0 && Math.floor(game.weapon.level * MASTERY_CONFIG.companionLevelRatio) >= 1) {
+        if (isFiring() && companion.cooldown === 0) {
             fireWeapon(true);
             companion.cooldown = FIRE_INTERVAL;
         }

@@ -63,6 +63,6 @@ const PROJECTILE_SPEED = 600;
 const SPREAD_CONFIG = { initialCount: 3, angle: 0.13 };
 const MASTERY_CONFIG = {
     thirdLevel: 20, widthPerRank: 0.25, ratePerRank: 0.2,
-    shieldCooldown: 10, companionLevelRatio: 0.5,
+    shieldCooldown: 6, companionLevel: 10, // 보조 탱크의 일반 포탄 고정 레벨
 };
 const BOMB_CONFIG = { damage: 200, damagePerStage: 20 };

@@ -628,16 +628,15 @@ test('third mastery requires switching after rank two then a fresh climb to twen
     }
 });
 
-test('companion uses half the equipped level and receives no mastery bonuses', () => {
+test('companion always fires level ten normal shells and receives no mastery bonuses', () => {
     run('game.mastery = {normal:3, spread:3, laser:3}');
     for (const type of ['normal', 'spread', 'laser']) {
         for (const level of [1, 2, 9, 20, 43]) {
             run(`game.weapon = {type:'${type}', level:${level}}; game.bullets = []; fireWeapon(true)`);
-            assert.equal(run('game.bullets.length'), level === 1 ? 0 : 1);
-            if (level === 1) continue;
+            assert.equal(run('game.bullets.length'), 1);
             const bullet = run('game.bullets[0]');
-            assert.equal(bullet.damage, run(`attackDamage('normal', ${Math.floor(level / 2)})`));
-            assert.equal(bullet.w, run(`WEAPONS.normal.width[${Math.min(10, Math.floor(level / 2)) - 1}]`));
+            assert.equal(bullet.damage, run("attackDamage('normal', 10)"));
+            assert.equal(bullet.w, run('WEAPONS.normal.width[9]'));
             assert.equal(bullet.vx, 0);
             assert.equal(bullet.reflects, false);
         }
@@ -645,7 +644,7 @@ test('companion uses half the equipped level and receives no mastery bonuses', (
 });
 
 test('companion follows and fires with base cadence even while laser is equipped', () => {
-    run(`game.mastery = {normal:3, spread:3, laser:3}; game.weapon = {type:'laser', level:20};
+    run(`game.mastery = {normal:3, spread:3, laser:3}; game.weapon = {type:'laser', level:1};
         keysDown[' '] = true; keysDown.ArrowRight = true; update(STEP)`);
     assert.ok(run('game.companion.x') > 126);
     assert.equal(run('game.bullets.filter(b => b.companion).length'), 1);
@@ -696,25 +695,38 @@ test('reflected laser reaches inward targets and counts each ray only once at it
     assert.ok(Math.abs(run('game.enemies[0].hp') - (1000 - 42 / 120)) < 1e-8);
 });
 
-test('shield charges in ten seconds, absorbs a hit and recharges without stacking', () => {
-    run("game.mastery.laser = 3; game.weapon.type = 'laser'");
-    advance(9.9);
-    assert.equal(run('game.shield.active'), false);
-    advance(0.1);
+test('laser rank three grants a shield immediately and recharges in six seconds after any damage source', () => {
+    run("game.mastery.laser = 2; game.thirdMasteryReady.laser = true; game.weapon = {type:'laser', level:19}");
+    pickup('laser');
     assert.equal(run('game.shield.active'), true);
+    assert.equal(run('game.shield.cooldown'), 0);
     advance(12);
     run('damagePlayer()');
     assert.equal(run('game.player.hp'), 2);
     assert.equal(run('game.shield.active'), false);
     run('damagePlayer()');
     assert.equal(run('game.player.hp'), 2);
-    advance(9.9);
+    advance(5.9);
     assert.equal(run('game.shield.active'), false);
     advance(0.1);
     assert.equal(run('game.shield.active'), true);
     run('damagePlayer(true)');
+    assert.equal(run('game.player.hp'), 2);
+    assert.equal(run('game.shield.active'), false);
+    assert.equal(run('game.shield.cooldown'), 6);
+});
+
+test('shield blocks one escaped enemy while the next escape still costs a heart', () => {
+    run(`game.mastery.laser = 3; game.shield.active = true;
+        Object.assign(spawnEnemy('normal'), {x:0, y:701}); update(STEP)`);
+    assert.equal(run('game.player.hp'), 2);
+    assert.equal(run('game.shield.active'), false);
+    assert.equal(run('game.enemies.length'), 0);
+    assert.equal(run('game.shield.cooldown'), 6);
+    run(`Object.assign(spawnEnemy('normal'), {x:0, y:701}); update(STEP)`);
     assert.equal(run('game.player.hp'), 1);
-    assert.equal(run('game.shield.active'), true);
+    assert.equal(run('game.score'), 0);
+    assert.equal(run('game.items.length'), 0);
 });
 
 test('enemy contact destroys enemy and consumes either one heart or the shield', () => {
@@ -733,7 +745,7 @@ test('shield consumes an incoming arrow without losing a heart', () => {
     assert.equal(run('game.arrows.length'), 0);
     assert.equal(run('game.player.hp'), 2);
     assert.equal(run('game.shield.active'), false);
-    assert.equal(run('game.shield.cooldown'), 10);
+    assert.equal(run('game.shield.cooldown'), 6);
 });
 
 test('new game clears third-rank abilities and unlock eligibility', () => {
@@ -742,7 +754,7 @@ test('new game clears third-rank abilities and unlock eligibility', () => {
     assert.equal(run('Object.values(game.mastery).join()'), '0,0,0');
     assert.equal(run('Object.values(game.thirdMasteryReady).some(Boolean)'), false);
     assert.equal(run('game.shield.active'), false);
-    assert.equal(run('game.shield.cooldown'), 10);
+    assert.equal(run('game.shield.cooldown'), 6);
     assert.equal(run('game.companion.cooldown'), 0);
 });
 test('difficulty reaches the former thirty-stage values at forty then grows to the hundred-stage caps', () => {
