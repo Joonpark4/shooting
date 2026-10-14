@@ -30,7 +30,9 @@ const run = source => vm.runInContext(source, context);
 // 실제 페이지와 동일한 파일 및 순서로 로드한다.
 const page = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 for (const [, src] of page.matchAll(/<script src="([^"]+)"><\/script>/g)) {
-    run(fs.readFileSync(path.join(__dirname, src), 'utf8'));
+    const source = fs.readFileSync(path.join(__dirname, src), 'utf8');
+    // 실제 설정의 테스트 모드는 보존하고, 기본 회귀 검사는 일반 모드에서 수행한다.
+    run(src === 'shooting-config.js' ? source.replace(/const TEST_MODE = (true|false);/, 'const TEST_MODE = false;') : source);
 }
 run('const originalRandom = Math.random');
 let passed = 0;
@@ -210,14 +212,14 @@ test('starting shells still one-shot grunts through stage fifty after a weapon s
         assert.equal(run('game.enemies.length'), 0, `stage ${stage}`);
     }
 });
-test('HP stays flat through stage nine then compounds by 1.3% per stage', () => {
+test('HP stays flat until the configured start then compounds by the configured rate', () => {
     for (const [type, base] of [['normal', 8], ['archer', 12], ['boss', 64]]) {
         let previous = 0;
         for (let stage = 1; stage <= 100; stage++) {
             run(`game.stage = ${stage}`);
             const hp = run(`enemyStats('${type}').hp`);
-            if (stage < 10) assert.equal(hp, base);
-            else assert.ok(Math.abs(hp / previous - 1.013) < 1e-10);
+            if (stage < run('STAGE_CONFIG.hpStart')) assert.equal(hp, base);
+            else assert.ok(Math.abs(hp / previous - run('1 + STAGE_CONFIG.hpGrowth')) < 1e-10);
             previous = hp;
         }
     }
@@ -517,18 +519,23 @@ test('thickness mastery affects spread and laser but never normal shells', () =>
         }
     }
 });
-test('split mastery gives one, two, three branches; rank one removes only the center shot', () => {
+test('split mastery gives three rays over sixty degrees then four rays over seventy degrees', () => {
     for (let rank = 0; rank <= 2; rank++) {
         run(`game.mastery.spread = ${rank}`);
         for (const level of [1, 10]) {
             run(`game.weapon = {type:'normal', level:${level}}; game.bullets = []; fireWeapon()`);
-            assert.equal(run('game.bullets.length'), 1 + rank);
+            const degrees = [[0], [-30, 0, 30], [-35, -35 / 3, 35 / 3, 35]][rank];
+            assert.equal(run('game.bullets.length'), degrees.length);
             assert.equal(run('game.bullets[0].vx + game.bullets.at(-1).vx'), 0);
-            assert.ok(Math.abs(run('Math.atan2(game.bullets.at(-1).vx, -game.bullets.at(-1).vy)') - (rank ? 0.22 : 0)) < 1e-10);
-            if (rank === 1) assert.equal(run('game.bullets.some(bullet => bullet.vx === 0)'), false);
+            for (let i = 0; i < degrees.length; i++) {
+                assert.ok(Math.abs(run(`Math.atan2(game.bullets[${i}].vx, -game.bullets[${i}].vy)`) - degrees[i] * Math.PI / 180) < 1e-10);
+            }
+            assert.equal(run('game.bullets.some(bullet => bullet.vx === 0)'), rank !== 2);
             run(`game.weapon.type = 'laser'`);
-            assert.equal(run('laserBeams().length'), 1 + rank);
-            assert.ok(Math.abs(run('Math.atan(laserBeams().at(-1).slope)') - (rank ? 0.22 : 0)) < 1e-10);
+            assert.equal(run('laserBeams().length'), degrees.length);
+            for (let i = 0; i < degrees.length; i++) {
+                assert.ok(Math.abs(run(`Math.atan(laserBeams()[${i}].slope)`) - degrees[i] * Math.PI / 180) < 1e-10);
+            }
             run(`game.weapon.type = 'spread'; game.bullets = []; fireWeapon()`);
             assert.equal(run('game.bullets.length'), level + 2);
             assert.ok(Math.abs(run('Math.atan2(game.bullets.at(-1).vx, -game.bullets.at(-1).vy)') - (level + 1) / 2 * 0.13) < 1e-10);
@@ -537,10 +544,9 @@ test('split mastery gives one, two, three branches; rank one removes only the ce
 });
 test('branched laser hits side targets while gaps and below-tank targets remain safe', () => {
     run(`game.mastery.spread = 1; game.weapon.type = 'laser'; keysDown[' '] = true;
-        for (const x of [70, 182, 294, 350]) Object.assign(spawnEnemy('boss'), {x, y:95, w:36, speed:0});
+        for (const x of [130, 182, 250, 350]) Object.assign(spawnEnemy('boss'), {x, y:500, w:36, speed:0});
         update(STEP);`);
-    for (const i of [0, 2]) assert.ok(run(`game.enemies[${i}].hp`) < 64);
-    assert.equal(run('game.enemies[1].hp'), 64, 'rank one has no central beam');
+    for (const i of [0, 1, 2]) assert.ok(run(`game.enemies[${i}].hp`) < 64);
     assert.equal(run('game.enemies[3].hp'), 64);
     assert.equal(run('laserBeams().some(beam => laserHits(beam, {x:180, y:680, w:40, h:10}))'), false);
     assert.equal(run('laserBeams().some(beam => laserHits(beam, {x:155, y:95, w:10, h:10}))'), false);
@@ -549,9 +555,9 @@ test('overlapping laser branches stack damage even before reflection mastery', (
     for (const rank of [1, 2]) {
         run(`resetGame(); game.enemyCooldown = 1e6;
             game.mastery = {normal:2, spread:${rank}, laser:2}; game.weapon.type = 'laser'; keysDown[' '] = true;
-            Object.assign(spawnEnemy('boss'), {x:0, y:300, w:400, speed:0, hp:1000, maxHp:1000});`);
+            Object.assign(spawnEnemy('boss'), {x:0, y:450, w:400, speed:0, hp:1000, maxHp:1000});`);
         advance(1);
-        assert.ok(Math.abs(run('game.enemies[0].hp') - (1000 - 42 * (rank + 1))) < 1e-8);
+        assert.ok(Math.abs(run('game.enemies[0].hp') - (1000 - 42 * (rank + 2))) < 1e-8);
         assert.equal(run('attackRate()'), 1);
     }
 });
@@ -655,7 +661,7 @@ test('third ranks retain the second-rank width rate and branch limits', () => {
     assert.equal(run("attackWidth('spread', 1)"), 6);
     assert.equal(run("attackWidth('normal', 1)"), 7);
     assert.equal(run('attackRate()'), 1.4);
-    assert.equal(run("shotCount('normal', 20)"), 3);
+    assert.equal(run("shotCount('normal', 20)"), 4);
     run("game.weapon.type = 'laser'");
     assert.equal(run('attackRate()'), 1);
 });
@@ -684,7 +690,7 @@ test('reflected laser reaches inward targets and counts each ray only once at it
     assert.equal(run('segments[0].endY'), run('segments[1].y'));
     assert.equal(run('segments[1].x'), 0);
     assert.equal(run('segments[0].slope'), -run('segments[1].slope'));
-    assert.equal(run('laserHits(segments[1], {x:76, y:100, w:10, h:10})'), true);
+    assert.equal(run('laserHits(segments[1], {x:76, y:450, w:10, h:10})'), true);
     run(`keysDown[' '] = true; Object.assign(spawnEnemy('boss'),
         {x:0, y:segments[1].y - 5, w:5, h:10, speed:0, hp:1000}); update(STEP)`);
     assert.ok(Math.abs(run('game.enemies[0].hp') - (1000 - 42 / 120)) < 1e-8);
@@ -741,9 +747,9 @@ test('new game clears third-rank abilities and unlock eligibility', () => {
 });
 test('difficulty reaches the former thirty-stage values at forty then grows to the hundred-stage caps', () => {
     const cases = [
-        ["enemyStats('normal').speed", 100, 180, 200],
-        ["enemyStats('archer').speed", 65, 117, 170],
-        ["enemyStats('boss').speed", 60, 108, 150],
+        ...['normal', 'archer', 'boss'].map(type => [
+            `enemyStats('${type}').speed`, ...Array.from(run(`[ENEMIES.${type}.speed, ENEMIES.${type}.midSpeed, ENEMIES.${type}.maxSpeed]`)),
+        ]),
         ['enemyInterval()', 0.9, 0.34, 0.25],
         ['bossInterval()', 5, 2.8, 2, 4],
         ['archerChance()', 0.215, 0.4, 0.4],
@@ -774,8 +780,8 @@ test('late-stage spawn timers and arrow movement use the new difficulty limits',
     run(`game.stage = 100; Math.random = () => 0.39;
         game.enemyCooldown = 0; game.bossCooldown = 0; update(STEP)`);
     assert.equal(run('game.enemies.map(e => e.type).join()'), 'archer,boss');
-    assert.equal(run('game.enemies[0].speed'), 167.8);
-    assert.equal(run('game.enemies[1].speed'), 147.8);
+    assert.equal(run('game.enemies[0].speed'), run('ENEMIES.archer.maxSpeed') - 2.2);
+    assert.equal(run('game.enemies[1].speed'), run('ENEMIES.boss.maxSpeed') - 2.2);
     assert.ok(Math.abs(run('game.enemyCooldown + STEP') - 0.25) < 1e-10);
     assert.ok(Math.abs(run('game.bossCooldown + STEP') - 2) < 1e-10);
     run(`Object.assign(game.enemies[0], {y:100, speed:0, shootCooldown:0}); update(STEP)`);
@@ -850,6 +856,36 @@ test('hidden tab and long stalls do not cause unlimited catch-up', () => {
     assert.ok(Math.abs(run('game.time') - 0.25) < 1e-8);
     run('document.hidden = true; advanceFrame(20000); document.hidden = false; advanceFrame(30000)');
     assert.ok(Math.abs(run('game.time') - 0.25) < 1e-8);
+});
+test('test mode awards five weapon pickups including crossed mastery milestones, leaving support items unchanged', () => {
+    const testing = vm.createContext({document: context.document});
+    const evaluate = code => vm.runInContext(code, testing);
+    for (const file of ['shooting-config.js', 'shooting-state.js', 'shooting-combat.js']) {
+        const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+        evaluate(file === 'shooting-config.js' ? source.replace(/const TEST_MODE = (true|false);/, 'const TEST_MODE = true;') : source);
+    }
+    evaluate('resetGame()');
+    const get = type => evaluate(`collectItem({type:'${type}', x:100, y:100})`);
+    get('normal');
+    assert.equal(evaluate('game.weapon.level'), 6);
+    get('normal');
+    assert.equal(evaluate('game.weapon.level'), 11);
+    assert.equal(evaluate('game.mastery.normal'), 1);
+    get('spread');
+    assert.equal(evaluate('game.weapon.level'), 5);
+    get('normal'); get('normal');
+    assert.equal(evaluate('game.mastery.normal'), 2);
+    get('normal'); get('normal');
+    assert.equal(evaluate('game.mastery.normal'), 2, 'must switch again before rank three');
+    get('laser'); get('normal');
+    evaluate('game.weapon.level = 18');
+    get('normal');
+    assert.equal(evaluate('game.weapon.level'), 23);
+    assert.equal(evaluate('game.mastery.normal'), 3);
+    for (const type of ['heart', 'speed', 'bomb']) get(type);
+    assert.equal(evaluate('game.player.hp'), 3);
+    assert.equal(evaluate('game.player.speedLevel'), 1);
+    assert.equal(evaluate('game.bombs'), 1);
 });
 console.log(`\n${passed} logic checks passed (no screen validation).`);
 

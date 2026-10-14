@@ -5,7 +5,8 @@ function spawnEnemy(type) {
     const enemy = {
         type, x: Math.random() * (canvas.width - base.size), y: -base.size,
         w: base.size, h: base.size, hp: stats.hp, maxHp: stats.hp,
-        speed: stats.speed + Math.random() * 20 - 10, shootCooldown: (1.3 + Math.random() * 0.7) * 2, hitFlash: 0,
+        speed: stats.speed + (Math.random() * 2 - 1) * ENEMY_SPEED_VARIATION,
+        shootCooldown: ARCHER_CONFIG.firstShotMin + Math.random() * (ARCHER_CONFIG.firstShotMax - ARCHER_CONFIG.firstShotMin), hitFlash: 0,
     };
     game.enemies.push(enemy);
     return enemy;
@@ -30,15 +31,15 @@ function addItem(type, x, y) {
 }
 
 function dropItems(enemy) {
-    const chance = enemy.type === "boss" ? 1 / 3 : 0.15;
+    const chance = enemy.type === "boss" ? DROP_RATES.bossWeapon : DROP_RATES.weapon;
     if (Math.random() < chance) {
         const type = Object.keys(WEAPONS)[Math.floor(Math.random() * 3)];
         addItem(type, enemy.x + enemy.w / 2 - 28, enemy.y);
     }
     // 하트는 무기 드랍과 별도로 추첨한다.
     if (Math.random() < HEART_DROP_RATE) addItem("heart", enemy.x + enemy.w / 2, enemy.y);
-    if (Math.random() < 0.03) addItem("speed", enemy.x, enemy.y - 32);
-    if (Math.random() < 0.015) addItem("bomb", enemy.x + enemy.w / 2, enemy.y - 64);
+    if (Math.random() < DROP_RATES.speed) addItem("speed", enemy.x, enemy.y - 32);
+    if (Math.random() < DROP_RATES.bomb) addItem("bomb", enemy.x + enemy.w / 2, enemy.y - 64);
 }
 
 function damageEnemy(enemy, damage) {
@@ -50,7 +51,7 @@ function damageEnemy(enemy, damage) {
     game.kills++;
     burst(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, enemy.type === "boss" ? "#ffbd70" : "#b6f887");
     dropItems(enemy);
-    const stage = 1 + Math.floor(game.kills / 10);
+    const stage = 1 + Math.floor(game.kills / STAGE_CONFIG.killsPerStage);
     if (stage > game.stage) {
         game.stage = stage;
         updateInformation();
@@ -62,13 +63,13 @@ function damagePlayer(escaped = false) {
     if (game.over || (!escaped && player.invulnerable > 0)) return;
     if (!escaped && game.shield.active) {
         game.shield.active = false;
-        game.shield.cooldown = 10;
-        player.invulnerable = 1.2;
+        game.shield.cooldown = MASTERY_CONFIG.shieldCooldown;
+        player.invulnerable = PLAYER_CONFIG.invulnerability;
         burst(player.x + player.w / 2, player.y + player.h / 2, "#71dbff");
         return;
     }
     player.hp = Math.max(0, player.hp - 1);
-    player.invulnerable = 1.2;
+    player.invulnerable = PLAYER_CONFIG.invulnerability;
     game.flash = 0.2;
     burst(player.x + player.w / 2, player.y + player.h / 2, "#ff708e");
     if (player.hp === 0) {
@@ -89,21 +90,24 @@ function collectItem(item) {
         game.bombs = Math.min(MAX_BOMBS, game.bombs + 1);
     } else {
         const weapon = game.weapon;
-        const previousLevel = weapon.level;
-        if (weapon.type !== item.type && game.mastery[weapon.type] === 2) {
-            game.thirdMasteryReady[weapon.type] = true;
-        }
-        weapon.level = weapon.type === item.type ? weapon.level + 1 : 1;
-        weapon.type = item.type;
-        // 9→10을 새로 달성할 때만 지급. 다시 받으려면 무기 교체로 1단계부터 쌓아야 한다.
-        if (previousLevel < WEAPON_MILESTONE && weapon.level === WEAPON_MILESTONE && game.mastery[item.type] < 2) {
-            game.mastery[item.type]++;
-        }
-        if (weapon.level === 20 && previousLevel === 19 && game.mastery[item.type] === 2 && game.thirdMasteryReady[item.type]) {
-            game.mastery[item.type] = 3;
-            if (item.type === "normal") {
-                game.companion.x = Math.max(0, game.player.x - 42);
-                game.companion.y = game.player.y + 18;
+        // 한 단계씩 처리해 테스트 모드에서도 10/20레벨 보너스를 건너뛰지 않는다.
+        for (let i = 0; i < (TEST_MODE ? 5 : 1); i++) {
+            const previousLevel = weapon.level;
+            if (weapon.type !== item.type && game.mastery[weapon.type] === 2) {
+                game.thirdMasteryReady[weapon.type] = true;
+            }
+            weapon.level = weapon.type === item.type ? weapon.level + 1 : 1;
+            weapon.type = item.type;
+            // 다시 받으려면 무기를 교체한 후 새로 10레벨에 도달해야 한다.
+            if (previousLevel < WEAPON_MILESTONE && weapon.level === WEAPON_MILESTONE && game.mastery[item.type] < 2) {
+                game.mastery[item.type]++;
+            }
+            if (weapon.level === MASTERY_CONFIG.thirdLevel && previousLevel === MASTERY_CONFIG.thirdLevel - 1 && game.mastery[item.type] === 2 && game.thirdMasteryReady[item.type]) {
+                game.mastery[item.type] = 3;
+                if (item.type === "normal") {
+                    game.companion.x = Math.max(0, game.player.x - 42);
+                    game.companion.y = game.player.y + 18;
+                }
             }
         }
         game.fireCooldown = 0;
@@ -114,7 +118,7 @@ function collectItem(item) {
 function useBomb() {
     if (game.over || game.bombs === 0) return;
     game.bombs--;
-    const damage = 200 + game.stage * 20;
+    const damage = BOMB_CONFIG.damage + game.stage * BOMB_CONFIG.damagePerStage;
     for (const enemy of game.enemies) {
         if (enemy.y + enemy.h > 0 && enemy.y < canvas.height && enemy.x + enemy.w > 0 && enemy.x < canvas.width) {
             damageEnemy(enemy, damage);
@@ -128,7 +132,7 @@ function useBomb() {
 function isFiring() { return !game.over && (keysDown[" "] || touchPointer !== null || autoFire); }
 
 function attackWidth(type, level) {
-    return WEAPONS[type].width[Math.min(level, WEAPON_MILESTONE) - 1] * (1 + (type === "normal" ? 0 : Math.min(2, game.mastery.normal) * 0.25));
+    return WEAPONS[type].width[Math.min(level, WEAPON_MILESTONE) - 1] * (1 + (type === "normal" ? 0 : Math.min(2, game.mastery.normal) * MASTERY_CONFIG.widthPerRank));
 }
 
 function attackDamage(type, level) {
@@ -137,16 +141,16 @@ function attackDamage(type, level) {
 }
 
 function attackRate() {
-    return 1 + (game.weapon.type === "laser" ? 0 : Math.min(2, game.mastery.laser) * 0.2);
+    return 1 + (game.weapon.type === "laser" ? 0 : Math.min(2, game.mastery.laser) * MASTERY_CONFIG.ratePerRank);
 }
 
 function shotCount(type, level) {
-    return type === "spread" ? Math.min(level, WEAPON_MILESTONE) + 2 : 1 + Math.min(2, game.mastery.spread);
+    return type === "spread" ? Math.min(level, WEAPON_MILESTONE) + SPREAD_CONFIG.initialCount - 1 : BONUS_BRANCH_ANGLES[Math.min(2, game.mastery.spread)].length;
 }
 
 function shotAngle(type, count, index) {
-    if (type !== "spread" && count === 2) return (index === 0 ? -1 : 1) * BONUS_BRANCH_ANGLE;
-    return (index - (count - 1) / 2) * (type === "spread" ? 0.13 : BONUS_BRANCH_ANGLE);
+    if (type !== "spread") return BONUS_BRANCH_ANGLES[Math.min(2, game.mastery.spread)][index];
+    return (index - (count - 1) / 2) * SPREAD_CONFIG.angle;
 }
 
 // 그리기와 충돌 판정에 같은 레이저 형상을 사용한다.
@@ -184,19 +188,19 @@ function laserHits(beam, enemy) {
 
 function fireWeapon(companion = false) {
     const type = companion ? "normal" : game.weapon.type;
-    const level = companion ? Math.floor(game.weapon.level / 2) : game.weapon.level;
+    const level = companion ? Math.floor(game.weapon.level * MASTERY_CONFIG.companionLevelRatio) : game.weapon.level;
     if (type === "laser" || level < 1) return;
     const visualLevel = Math.min(level, WEAPON_MILESTONE);
     const count = companion ? 1 : shotCount(type, level);
     for (let i = 0; i < count; i++) {
-        const angle = shotAngle(type, count, i);
+        const angle = companion ? 0 : shotAngle(type, count, i);
         const width = companion ? WEAPONS.normal.width[visualLevel - 1] : attackWidth(type, level);
         game.bullets.push({
             type, companion, reflects: !companion && game.mastery.spread >= 3 && count > 1,
             x: (companion ? game.companion.x + 16 : game.player.x + game.player.w / 2) - width / 2,
             y: (companion ? game.companion.y : game.player.y) - 18,
             w: width, h: type === "spread" ? 18 + visualLevel * 0.5 : 18 + visualLevel * 2,
-            vx: Math.sin(angle) * 600, vy: -Math.cos(angle) * 600,
+            vx: Math.sin(angle) * PROJECTILE_SPEED, vy: -Math.cos(angle) * PROJECTILE_SPEED,
             damage: attackDamage(type, level),
             color: type === "spread" ? `hsl(140, 60%, ${62 + visualLevel}%)` : LEVEL_COLORS[visualLevel - 1],
             glow: type === "spread" ? 3 : 9, alive: true,
@@ -211,7 +215,7 @@ function update(dt) {
     player.invulnerable = Math.max(0, player.invulnerable - dt);
     game.flash = Math.max(0, game.flash - dt);
     game.bombFlash = Math.max(0, game.bombFlash - dt);
-    const speedMultiplier = 1 + player.speedLevel * 0.03;
+    const speedMultiplier = 1 + player.speedLevel * PLAYER_CONFIG.speedPerItem;
     if (touchTarget !== null) {
         const distance = PLAYER_SPEED * speedMultiplier * dt;
         player.x += Math.max(-distance, Math.min(distance, touchTarget - player.x));
@@ -232,7 +236,7 @@ function update(dt) {
         companion.x += (targetX - companion.x) * (1 - Math.exp(-8 * dt));
         companion.y = player.y + 18;
         companion.cooldown = Math.max(0, companion.cooldown - dt);
-        if (isFiring() && companion.cooldown === 0 && game.weapon.level >= 2) {
+        if (isFiring() && companion.cooldown === 0 && Math.floor(game.weapon.level * MASTERY_CONFIG.companionLevelRatio) >= 1) {
             fireWeapon(true);
             companion.cooldown = FIRE_INTERVAL;
         }
@@ -243,7 +247,7 @@ function update(dt) {
         spawnEnemy(Math.random() < archerChance() ? "archer" : "normal");
         game.enemyCooldown += enemyInterval();
     }
-    if (game.stage >= 4) {
+    if (game.stage >= STAGE_CONFIG.bossStart) {
         game.bossCooldown -= dt;
         if (game.bossCooldown <= 0) {
             spawnEnemy("boss");
@@ -305,7 +309,7 @@ function update(dt) {
         } else if (overlaps(enemy, hitbox)) {
             enemy.hp = 0;
             damagePlayer();
-        } else if (enemy.type === "archer" && enemy.y >= 50 && enemy.y + enemy.h < player.y) {
+        } else if (enemy.type === "archer" && enemy.y >= ARCHER_CONFIG.fireMinY && enemy.y + enemy.h < player.y) {
             enemy.shootCooldown -= dt;
             if (enemy.shootCooldown <= 0) {
                 game.arrows.push({ x: enemy.x + enemy.w / 2 - 4, y: enemy.y + enemy.h, w: 8, h: 26 });
@@ -325,7 +329,7 @@ function update(dt) {
     }
     game.arrows = game.arrows.filter(arrow => arrow.y <= canvas.height);
     for (const item of game.items) {
-        item.y += 110 * dt;
+        item.y += ITEM_FALL_SPEED * dt;
         if (overlaps(item, player)) {
             collectItem(item);
             item.y = canvas.height + 1;
