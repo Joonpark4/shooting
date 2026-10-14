@@ -216,8 +216,8 @@ test('starting shells one-shot grunts through stage five, then HP rises gently',
         }
     }
 });
-test('weapon drop thresholds are exactly 1/10 and 1/3, including archers', () => {
-    for (const [type, threshold] of [['normal', 0.1], ['archer', 0.1], ['boss', 1 / 3]]) {
+test('weapon drop thresholds are 15% for normal/archer and 1/3 for bosses', () => {
+    for (const [type, threshold] of [['normal', 0.15], ['archer', 0.15], ['boss', 1 / 3]]) {
         for (const [roll, expected] of [[threshold - 1e-8, 1], [threshold, 0]]) {
             run(`game.items = []; globalThis.rolls = [${roll}, 0.5, 0.5];
                 Math.random = () => rolls.shift() ?? 0.5;
@@ -361,20 +361,20 @@ test('bosses start at stage four, game over freezes combat, restart resets every
     listeners.pointerdown(pointer(1, 130));
     assert.equal(run('game.over'), false);
 });
-test('speed items stack up to five and accelerate both keyboard and touch', () => {
+test('speed items stack up to ten and accelerate both keyboard and touch', () => {
     const distances = [];
     for (const touch of [false, true]) {
         for (const upgraded of [false, true]) {
             run('resetGame(); game.enemyCooldown = 1e6; game.player.x = 0');
-            if (upgraded) for (let i = 0; i < 8; i++) pickup('speed');
-            assert.equal(run('game.player.speedLevel'), upgraded ? 5 : 0);
+            if (upgraded) for (let i = 0; i < 12; i++) pickup('speed');
+            assert.equal(run('game.player.speedLevel'), upgraded ? 10 : 0);
             run(touch ? 'touchTarget = 336' : 'keysDown.ArrowRight = true');
             advance(0.1);
             distances.push(run('game.player.x'));
         }
     }
-    assert.ok(Math.abs(distances[1] / distances[0] - 1.6) < 1e-10);
-    assert.ok(Math.abs(distances[3] / distances[2] - 1.6) < 1e-10);
+    assert.ok(Math.abs(distances[1] / distances[0] - 2.2) < 1e-10);
+    assert.ok(Math.abs(distances[3] / distances[2] - 2.2) < 1e-10);
     assert.equal(run('game.weapon.level'), 1);
 });
 test('speed and bomb drop independently without reducing weapon drop chances', () => {
