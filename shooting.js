@@ -42,6 +42,9 @@ let lev = 0; // 레벨업할때 필요, 10킬 마다 1업씩
 let tankX = canvas.width / 2 - 32;
 let tankY = canvas.height - 90;
 let dot = true;
+let touchPointer = null;
+let lastTouchShot = 0;
+let touchUsed = false;
 
 // 총알을 생성하고, 초기값을 준다
 let bulletList = []; // 총알을 저장하는 리스트
@@ -219,6 +222,42 @@ function createBullet() {
     b.init();
 }
 
+// 화면에 표시된 캔버스 크기를 게임 좌표로 환산한다.
+function moveTouchTank(event) {
+    const bounds = canvas.getBoundingClientRect();
+    tankX = Math.max(0, Math.min(canvas.width - 64,
+        (event.clientX - bounds.left) * canvas.width / bounds.width - 32));
+}
+
+canvas.addEventListener("pointerdown", function (event) {
+    if (event.pointerType === "mouse" || touchPointer !== null) return;
+    if (gameover) {
+        window.location.reload();
+        return;
+    }
+    touchPointer = event.pointerId;
+    touchUsed = true;
+    canvas.setPointerCapture(event.pointerId);
+    moveTouchTank(event);
+    createBullet();
+    lastTouchShot = performance.now();
+});
+
+canvas.addEventListener("pointermove", function (event) {
+    if (event.pointerId === touchPointer && !gameover) moveTouchTank(event);
+});
+
+function stopTouch(event) {
+    if (event.pointerId === touchPointer) touchPointer = null;
+}
+canvas.addEventListener("pointerup", stopTouch);
+canvas.addEventListener("pointercancel", stopTouch);
+canvas.addEventListener("lostpointercapture", stopTouch);
+window.addEventListener("blur", function () {
+    touchPointer = null;
+    keysDown = {};
+});
+
 // 적군의 생성
 // function createEnemy(){
 //     const interval = setInterval(function(){
@@ -251,6 +290,10 @@ function createBoss() {
 
 
 function update() {
+    if (touchPointer !== null && performance.now() - lastTouchShot >= 150) {
+        createBullet();
+        lastTouchShot = performance.now();
+    }
     if ("ArrowRight" in keysDown) {
         if (tankX <= 400 - 64)
             tankX += tankSpeed; // 탱크 속도
@@ -291,6 +334,10 @@ function render() {
     ctx.font = "25px Arial"
     ctx.fillText(`Score:${score}`, 20, 30);
     ctx.fillText(`Level:${level + 1}`, 300, 30); // 레벨은 내부 연산에서 0부터 시작하지만 보여줄땐 1부터 시작하도록 보여준다
+    if (!touchUsed && window.matchMedia("(max-width: 768px), (pointer: coarse)").matches) {
+        ctx.font = "16px Arial";
+        ctx.fillText("터치한 채 좌우로 이동 · 누르는 동안 발사", 55, 680);
+    }
     for (var i = 0; i < bulletList.length; i++) {
         if (bulletList[i].alive) {
             ctx.drawImage(bulletImg, bulletList[i].x, bulletList[i].y);
@@ -315,6 +362,11 @@ function main() {
 
     } else {
         ctx.drawImage(gameoverImg, 10, 140, 380, 380);
+        if (window.matchMedia("(max-width: 768px), (pointer: coarse)").matches) {
+            ctx.fillStyle = "white";
+            ctx.font = "20px Arial";
+            ctx.fillText("터치하여 다시 시작", 115, 550);
+        }
     }
 }
 
@@ -333,8 +385,7 @@ let bossspeed_box = document.querySelector("#BossSpeedBox");
 bossspeed_box.value = bossSpeed;
 let bosscreationspeed_box = document.querySelector("#BossCreationSpeedBox");
 bosscreationspeed_box.value = createBossSpeed;
-dot = document.querySelector("#dot");
-dot.addEventListener("click", function () {
+document.querySelector("#dot").addEventListener("click", function () {
     (dot == true) ? dot = false : dot = true;
 });
 

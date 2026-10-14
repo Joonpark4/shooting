@@ -51,6 +51,34 @@
         fieldset {
             margin-bottom: 35px;
         }
+
+        canvas {
+            touch-action: none;
+            user-select: none;
+        }
+
+        @media (max-width: 768px), (pointer: coarse) {
+            body {
+                margin: 0;
+                height: 100vh;
+                height: 100dvh;
+                display: grid;
+                place-items: center;
+                overflow: hidden;
+                background: #000;
+            }
+
+            h3, .manual, #dot {
+                display: none;
+            }
+
+            canvas {
+                display: block;
+                width: min(100vw, calc(100vh * 4 / 7));
+                width: min(100vw, calc(100dvh * 4 / 7));
+                height: auto;
+            }
+        }
     </style>
 </head>
 
