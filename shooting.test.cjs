@@ -291,17 +291,17 @@ test('falling items are collected by contact and missed items are removed', () =
 });
 test('scaled touch input clamps movement, supports one finger and stops firing on release', () => {
     listeners.pointerdown(pointer(1, 130));
-    assert.equal(run('touchTarget'), 168);
+    assert.equal(run('touchTarget'), 169.5);
     advance(1 / 120);
     assert.equal(run('game.bullets.length'), 1);
     listeners.pointerdown(pointer(2, 230));
-    assert.equal(run('touchTarget'), 168);
+    assert.equal(run('touchTarget'), 169.5);
     listeners.pointermove(pointer(1, -50));
     advance(0.5);
     assert.equal(run('game.player.x'), 0);
     listeners.pointermove(pointer(1, 300));
     advance(1);
-    assert.equal(run('game.player.x'), 336);
+    assert.equal(run('game.player.x'), 339);
     listeners.pointerup(pointer(2, 130));
     assert.equal(run('touchPointer'), 1);
     listeners.pointerup(pointer(1, 130));
@@ -326,7 +326,7 @@ test('keyboard supports hold-to-fire and movement without going outside canvas',
     listeners.keydown(key(' '));
     listeners.keydown(key('ArrowRight'));
     advance(0.5);
-    assert.equal(run('game.player.x'), 336);
+    assert.equal(run('game.player.x'), 339);
     assert.ok(run('game.bullets.length') >= 2);
     listeners.keyup(key(' '));
     listeners.keyup(key('ArrowRight'));
@@ -733,16 +733,16 @@ test('new game clears third-rank abilities and unlock eligibility', () => {
     assert.equal(run('game.shield.cooldown'), 10);
     assert.equal(run('game.companion.cooldown'), 0);
 });
-test('difficulty reaches old limits at thirty and doubled intensity at one hundred', () => {
+test('difficulty reaches stage thirty values and final limits at one hundred', () => {
     const cases = [
-        ["enemyStats('normal').speed", 100, 180, 360],
-        ["enemyStats('archer').speed", 65, 117, 234],
-        ["enemyStats('boss').speed", 60, 108, 216],
+        ["enemyStats('normal').speed", 100, 180, 210],
+        ["enemyStats('archer').speed", 65, 117, 200],
+        ["enemyStats('boss').speed", 60, 108, 180],
         ['enemyInterval()', 0.9, 0.34, 0.17],
-        ['bossInterval()', 5, 2.8, 1.4],
+        ['bossInterval()', 5, 2.8, 2],
         ['archerChance()', 0.215, 0.4, 0.4],
-        ['arrowInterval()', 3.72, 1.8, 0.9],
-        ['arrowSpeed()', 252, 370, 740],
+        ['arrowInterval()', 3.72, 1.8, 1.2],
+        ['arrowSpeed()', 252, 370, 500],
     ];
     for (const [expression, initial, at30, at100] of cases) {
         let previous = initial;
@@ -763,13 +763,56 @@ test('late-stage spawn timers and arrow movement use the new difficulty limits',
     run(`game.stage = 100; Math.random = () => 0.39;
         game.enemyCooldown = 0; game.bossCooldown = 0; update(STEP)`);
     assert.equal(run('game.enemies.map(e => e.type).join()'), 'archer,boss');
-    assert.equal(run('game.enemies[0].speed'), 234);
-    assert.equal(run('game.enemies[1].speed'), 216);
+    assert.equal(run('game.enemies[0].speed'), 197.8);
+    assert.equal(run('game.enemies[1].speed'), 177.8);
     assert.ok(Math.abs(run('game.enemyCooldown + STEP') - 0.17) < 1e-10);
-    assert.ok(Math.abs(run('game.bossCooldown + STEP') - 1.4) < 1e-10);
+    assert.ok(Math.abs(run('game.bossCooldown + STEP') - 2) < 1e-10);
     run(`Object.assign(game.enemies[0], {y:100, speed:0, shootCooldown:0}); update(STEP)`);
-    assert.equal(run('game.enemies[0].shootCooldown'), 0.9);
-    assert.ok(Math.abs(run('game.arrows[0].y') - (138 + 740 / 120)) < 1e-10);
+    assert.ok(Math.abs(run('game.enemies[0].shootCooldown') - 1.2) < 1e-10);
+    assert.ok(Math.abs(run('game.arrows[0].y') - (138 + 500 / 120)) < 1e-10);
+});
+test('enemy speed varies by up to ten around its stage base and stays fixed after spawning', () => {
+    for (const stage of [1, 30, 100, 200]) {
+        for (const type of ['normal', 'archer', 'boss']) {
+            for (const roll of [0, 0.5, 0.999999]) {
+                run(`game.stage = ${stage}; Math.random = () => ${roll}; game.enemies = []; spawnEnemy('${type}')`);
+                const speed = run('game.enemies[0].speed');
+                assert.ok(Math.abs(speed - run(`enemyStats('${type}').speed`) - (roll * 20 - 10)) < 1e-10);
+                run('game.stage++; update(STEP)');
+                assert.equal(run('game.enemies[0].speed'), speed);
+            }
+        }
+    }
+});
+
+test('heart and bomb each allow one active drop and can drop again after removal', () => {
+    for (const type of ['heart', 'bomb']) {
+        run(`game.items = []; addItem('${type}', 0, -50); addItem('${type}', 100, 100)`);
+        assert.equal(run('game.items.length'), 1);
+        run(`game.items[0].y = 701; update(STEP); addItem('${type}', 0, 100)`);
+        assert.equal(run('game.items.length'), 1);
+        run(`game.items[0].x = game.player.x; game.items[0].y = game.player.y; update(STEP)`);
+        assert.equal(run('game.items.length'), 0);
+        run(`addItem('${type}', 0, 100)`);
+        assert.equal(run('game.items.length'), 1);
+    }
+    run(`game.items = []; Math.random = () => 0;
+        for (let i = 0; i < 3; i++) dropItems({type:'normal', x:100, y:100, w:36})`);
+    assert.equal(run("game.items.filter(i => i.type === 'heart').length"), 1);
+    assert.equal(run("game.items.filter(i => i.type === 'bomb').length"), 1);
+    assert.equal(run("game.items.filter(i => i.type === 'normal').length"), 3);
+    assert.equal(run("game.items.filter(i => i.type === 'speed').length"), 3);
+});
+
+test('smaller tank avoids items beyond its new edge and fires from its center', () => {
+    assert.equal(run('game.player.w'), 61);
+    assert.equal(run('game.player.h'), 61);
+    run(`addItem('normal', game.player.x + 62, game.player.y); update(STEP)`);
+    assert.equal(run('game.weapon.level'), 1);
+    run('game.items[0].x = game.player.x + 60; update(STEP)');
+    assert.equal(run('game.weapon.level'), 2);
+    run('game.bullets = []; fireWeapon()');
+    assert.equal(run('game.bullets[0].x + game.bullets[0].w / 2'), run('game.player.x + game.player.w / 2'));
 });
 console.log(`\n${passed} logic checks passed (no screen validation).`);
 

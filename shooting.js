@@ -25,9 +25,9 @@ const MAX_BOMBS = 5;
 const DOUBLE_PRESS_MS = 300;
 const BONUS_BRANCH_ANGLE = 0.22;
 const ENEMIES = {
-    normal: { hp: 8, speed: 100, size: 36, score: 1 },
-    archer: { hp: 12, speed: 65, size: 38, score: 2 },
-    boss: { hp: 64, speed: 60, size: 60, score: 3 },
+    normal: { hp: 8, speed: 100, maxSpeed: 210, size: 36, score: 1 },
+    archer: { hp: 12, speed: 65, maxSpeed: 200, size: 38, score: 2 },
+    boss: { hp: 64, speed: 60, maxSpeed: 180, size: 60, score: 3 },
 };
 const HEART_DROP_RATE = 0.005;
 const MAX_HEARTS = 5;
@@ -49,7 +49,7 @@ let touchGesture = null;
 function resetGame() {
     game = {
         over: false, score: 0, kills: 0, stage: 1, time: 0,
-        player: { x: 168, y: 610, w: 64, h: 64, hp: 2, maxHp: 2, invulnerable: 0, speedLevel: 0 },
+        player: { x: 169.5, y: 610, w: 61, h: 61, hp: 2, maxHp: 2, invulnerable: 0, speedLevel: 0 },
         bombs: 0, bombFlash: 0,
         weapon: { type: "normal", level: 1 },
         mastery: { normal: 0, spread: 0, laser: 0 },
@@ -86,17 +86,17 @@ function stageValue(initial, at30, at100, startStage = 1) {
 }
 
 function enemyInterval() { return stageValue(0.9, 0.34, 0.17); }
-function bossInterval() { return stageValue(5, 2.8, 1.4, 4); }
+function bossInterval() { return stageValue(5, 2.8, 2, 4); }
 function archerChance() { return stageValue(0.215, 0.4, 0.4); }
-function arrowInterval() { return stageValue(3.72, 1.8, 0.9); }
-function arrowSpeed() { return stageValue(252, 370, 740); }
+function arrowInterval() { return stageValue(3.72, 1.8, 1.2); }
+function arrowSpeed() { return stageValue(252, 370, 500); }
 
 function enemyStats(type) {
     const base = ENEMIES[type];
     return {
         // 1~9스테이지는 고정, 10부터 직전 스테이지 체력의 1.5%씩 복리 증가.
         hp: base.hp * 1.015 ** Math.max(0, game.stage - 9),
-        speed: stageValue(base.speed, base.speed * 1.8, base.speed * 3.6),
+        speed: stageValue(base.speed, base.speed * 1.8, base.maxSpeed),
     };
 }
 
@@ -119,7 +119,7 @@ function spawnEnemy(type) {
     const enemy = {
         type, x: Math.random() * (canvas.width - base.size), y: -base.size,
         w: base.size, h: base.size, hp: stats.hp, maxHp: stats.hp,
-        speed: stats.speed, shootCooldown: (1.3 + Math.random() * 0.7) * 2, hitFlash: 0,
+        speed: stats.speed + Math.random() * 20 - 10, shootCooldown: (1.3 + Math.random() * 0.7) * 2, hitFlash: 0,
     };
     game.enemies.push(enemy);
     return enemy;
@@ -139,6 +139,7 @@ function burst(x, y, color, count = 10) {
 }
 
 function addItem(type, x, y) {
+    if ((type === "heart" || type === "bomb") && game.items.some(item => item.type === type && item.y <= canvas.height)) return;
     game.items.push({ type, x: Math.max(0, Math.min(canvas.width - 28, x)), y, w: 28, h: 28 });
 }
 
@@ -177,13 +178,13 @@ function damagePlayer(escaped = false) {
         game.shield.active = false;
         game.shield.cooldown = 10;
         player.invulnerable = 1.2;
-        burst(player.x + 32, player.y + 32, "#71dbff");
+        burst(player.x + player.w / 2, player.y + player.h / 2, "#71dbff");
         return;
     }
     player.hp = Math.max(0, player.hp - 1);
     player.invulnerable = 1.2;
     game.flash = 0.2;
-    burst(player.x + 32, player.y + 32, "#ff708e");
+    burst(player.x + player.w / 2, player.y + player.h / 2, "#ff708e");
     if (player.hp === 0) {
         game.over = true;
         game.laserActive = false;
@@ -267,7 +268,7 @@ function laserBeams() {
     const count = shotCount("laser", game.weapon.level);
     const beams = [];
     for (let ray = 0; ray < count; ray++) {
-        let x = game.player.x + 32;
+        let x = game.player.x + game.player.w / 2;
         let y = game.player.y;
         let slope = Math.tan(shotAngle("laser", count, ray));
         while (y > 0) {
@@ -395,7 +396,7 @@ function fireWeapon(companion = false) {
         const width = companion ? WEAPONS.normal.width[visualLevel - 1] : attackWidth(type, level);
         game.bullets.push({
             type, companion, reflects: !companion && game.mastery.spread >= 3 && count > 1,
-            x: (companion ? game.companion.x + 16 : game.player.x + 32) - width / 2,
+            x: (companion ? game.companion.x + 16 : game.player.x + game.player.w / 2) - width / 2,
             y: (companion ? game.companion.y : game.player.y) - 18,
             w: width, h: type === "spread" ? 18 + visualLevel * 0.5 : 18 + visualLevel * 2,
             vx: Math.sin(angle) * 600, vy: -Math.cos(angle) * 600,
@@ -498,7 +499,7 @@ function update(dt) {
     }
 
     // 기체 외곽보다 작은 피격 영역을 사용해 회피 여유를 둔다.
-    const hitbox = { x: player.x + 12, y: player.y + 12, w: 40, h: 44 };
+    const hitbox = { x: player.x + 12, y: player.y + 12, w: player.w - 24, h: player.h - 20 };
     for (const enemy of game.enemies) {
         if (enemy.hp <= 0) continue;
         if (enemy.y >= canvas.height) {
@@ -659,7 +660,7 @@ function render() {
         ctx.shadowBlur = 12;
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.ellipse(player.x + 32, player.y + 32, 43, 43, 0, 0, Math.PI * 2);
+        ctx.ellipse(player.x + player.w / 2, player.y + player.h / 2, 41.5, 41.5, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
         ctx.restore();
