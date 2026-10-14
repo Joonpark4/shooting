@@ -78,24 +78,27 @@ function clearInput() {
     if (game) game.laserActive = false;
 }
 
-// 시작부터 100스테이지까지 선형으로 변화하고 이후 제한값을 유지한다.
-function stageValue(initial, at100, startStage = 1) {
-    const progress = Math.max(0, Math.min(1, (game.stage - startStage) / (100 - startStage)));
-    return initial + (at100 - initial) * progress;
+// 기존 30스테이지 난이도에 40에서 도달하고, 100까지 선형으로 강화한다.
+function stageValue(initial, at40, at100, startStage = 1) {
+    if (game.stage <= 40) {
+        const progress = Math.max(0, (game.stage - startStage) / (40 - startStage));
+        return initial + (at40 - initial) * progress;
+    }
+    return at40 + (at100 - at40) * Math.min(1, (game.stage - 40) / 60);
 }
 
-function enemyInterval() { return stageValue(0.9, 0.25); }
-function bossInterval() { return stageValue(5, 2, 4); }
-function archerChance() { return stageValue(0.215, 0.4); }
-function arrowInterval() { return stageValue(3.72, 1.2); }
-function arrowSpeed() { return stageValue(252, 500); }
+function enemyInterval() { return stageValue(0.9, 0.34, 0.25); }
+function bossInterval() { return stageValue(5, 2.8, 2, 4); }
+function archerChance() { return stageValue(0.215, 0.4, 0.4); }
+function arrowInterval() { return stageValue(3.72, 1.8, 1.2); }
+function arrowSpeed() { return stageValue(252, 370, 500); }
 
 function enemyStats(type) {
     const base = ENEMIES[type];
     return {
         // 1~9스테이지는 고정, 10부터 직전 스테이지 체력의 1.3%씩 복리 증가.
         hp: base.hp * 1.013 ** Math.max(0, game.stage - 9),
-        speed: stageValue(base.speed, base.maxSpeed),
+        speed: stageValue(base.speed, base.speed * 1.8, base.maxSpeed),
     };
 }
 

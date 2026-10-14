@@ -222,8 +222,8 @@ test('HP stays flat through stage nine then compounds by 1.3% per stage', () => 
         }
     }
 });
-test('weapon drop thresholds are 10% for normal/archer and 1/3 for bosses', () => {
-    for (const [type, threshold] of [['normal', 0.1], ['archer', 0.1], ['boss', 1 / 3]]) {
+test('weapon drop thresholds are 15% for normal/archer and 1/3 for bosses', () => {
+    for (const [type, threshold] of [['normal', 0.15], ['archer', 0.15], ['boss', 1 / 3]]) {
         for (const [roll, expected] of [[threshold - 1e-8, 1], [threshold, 0]]) {
             run(`game.items = []; globalThis.rolls = [${roll}, 0.5, 0.5];
                 Math.random = () => rolls.shift() ?? 0.5;
@@ -739,18 +739,18 @@ test('new game clears third-rank abilities and unlock eligibility', () => {
     assert.equal(run('game.shield.cooldown'), 10);
     assert.equal(run('game.companion.cooldown'), 0);
 });
-test('difficulty changes linearly until stage one hundred then stays capped', () => {
+test('difficulty reaches the former thirty-stage values at forty then grows to the hundred-stage caps', () => {
     const cases = [
-        ["enemyStats('normal').speed", 100, 200],
-        ["enemyStats('archer').speed", 65, 170],
-        ["enemyStats('boss').speed", 60, 150],
-        ['enemyInterval()', 0.9, 0.25],
-        ['bossInterval()', 5, 2, 4],
-        ['archerChance()', 0.215, 0.4],
-        ['arrowInterval()', 3.72, 1.2],
-        ['arrowSpeed()', 252, 500],
+        ["enemyStats('normal').speed", 100, 180, 200],
+        ["enemyStats('archer').speed", 65, 117, 170],
+        ["enemyStats('boss').speed", 60, 108, 150],
+        ['enemyInterval()', 0.9, 0.34, 0.25],
+        ['bossInterval()', 5, 2.8, 2, 4],
+        ['archerChance()', 0.215, 0.4, 0.4],
+        ['arrowInterval()', 3.72, 1.8, 1.2],
+        ['arrowSpeed()', 252, 370, 500],
     ];
-    for (const [expression, initial, at100, start = 1] of cases) {
+    for (const [expression, initial, at40, at100, start = 1] of cases) {
         let previous = initial;
         for (let stage = 1; stage <= 101; stage++) {
             run(`game.stage = ${stage}`);
@@ -758,8 +758,12 @@ test('difficulty changes linearly until stage one hundred then stays capped', ()
             assert.ok((actual - previous) * Math.sign(at100 - initial) >= -1e-10, expression);
             previous = actual;
             if (stage <= start) assert.equal(actual, initial);
-            else if (stage <= 100) assert.ok(Math.abs(actual - run(`game.stage--; ${expression}`) - (at100 - initial) / (100 - start)) < 1e-10, `${expression} at ${stage}`);
+            else if (stage <= 100) {
+                const increment = stage <= 40 ? (at40 - initial) / (40 - start) : (at100 - at40) / 60;
+                assert.ok(Math.abs(actual - run(`game.stage--; ${expression}`) - increment) < 1e-10, `${expression} at ${stage}`);
+            }
             else assert.ok(Math.abs(actual - at100) < 1e-10);
+            if (stage === 40) assert.ok(Math.abs(actual - at40) < 1e-10);
         }
         run('game.stage = 500');
         assert.ok(Math.abs(run(expression) - at100) < 1e-10);

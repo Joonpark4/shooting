@@ -30,7 +30,7 @@ function addItem(type, x, y) {
 }
 
 function dropItems(enemy) {
-    const chance = enemy.type === "boss" ? 1 / 3 : 0.1;
+    const chance = enemy.type === "boss" ? 1 / 3 : 0.15;
     if (Math.random() < chance) {
         const type = Object.keys(WEAPONS)[Math.floor(Math.random() * 3)];
         addItem(type, enemy.x + enemy.w / 2 - 28, enemy.y);
