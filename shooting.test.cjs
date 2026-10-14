@@ -76,12 +76,12 @@ test('scrolling background overlap covers every row before and after wrapping', 
     }
     run('backgroundTile = null; delete ctx.drawImage');
 });
-test('same weapon upgrades to ten; switching always starts at one', () => {
+test('same weapon upgrades beyond ten; switching always starts at one', () => {
     for (const type of ['spread', 'laser', 'normal']) {
         pickup(type);
         assert.equal(run('game.weapon.level'), 1);
         for (let i = 0; i < 12; i++) pickup(type);
-        assert.equal(run('game.weapon.level'), 10);
+        assert.equal(run('game.weapon.level'), 13);
     }
     pickup('laser');
     assert.equal(run('game.weapon.level'), 1, 'returning to a former weapon does not restore its level');
@@ -189,35 +189,37 @@ test('dead enemies award kills and drops once; every ten kills advances stage', 
     assert.equal(run('game.kills'), 10);
     assert.equal(run('game.stage'), 2);
 });
-test('each enemy type gains HP with stage; existing enemies keep their spawn HP', () => {
+test('each enemy type gains HP from stage ten; existing enemies keep their spawn HP', () => {
     run('globalThis.oldEnemy = spawnEnemy("normal")');
     for (const type of ['normal', 'archer', 'boss']) {
         run('game.stage = 1');
         const first = run(`spawnEnemy('${type}').hp`);
-        run('game.stage = 5');
+        run('game.stage = 10');
         assert.ok(run(`spawnEnemy('${type}').hp`) > first);
     }
     assert.equal(run('oldEnemy.hp'), 8);
 });
-test('starting shells one-shot grunts through stage five, then HP rises gently', () => {
-    for (let stage = 1; stage <= 6; stage++) {
+test('starting shells still one-shot grunts through stage fifty after a weapon switch', () => {
+    for (const stage of [1, 9, 10, 20, 50]) {
         run(`resetGame(); game.stage = ${stage}; game.enemyCooldown = 1e6;
             Object.assign(spawnEnemy('normal'), { x:182, y:580, speed:0 }); fireWeapon(); update(STEP);`);
-        assert.equal(run('game.enemies.length'), stage <= 5 ? 0 : 1, `stage ${stage}`);
+        assert.equal(run('game.enemies.length'), 0, `stage ${stage}`);
     }
-    assert.equal(run('game.enemies[0].hp'), 2, 'stage six needs just one more hit');
-    for (const [type, growth] of [['normal', 2], ['archer', 2], ['boss', 6]]) {
+});
+test('HP stays flat through stage nine then compounds by 1.5% per stage', () => {
+    for (const [type, base] of [['normal', 8], ['archer', 12], ['boss', 64]]) {
         let previous = 0;
-        for (let stage = 1; stage <= 20; stage++) {
+        for (let stage = 1; stage <= 100; stage++) {
             run(`game.stage = ${stage}`);
             const hp = run(`enemyStats('${type}').hp`);
-            if (stage > 1) assert.equal(hp - previous, growth);
+            if (stage < 10) assert.equal(hp, base);
+            else assert.ok(Math.abs(hp / previous - 1.015) < 1e-10);
             previous = hp;
         }
     }
 });
-test('weapon drop thresholds are 15% for normal/archer and 1/3 for bosses', () => {
-    for (const [type, threshold] of [['normal', 0.15], ['archer', 0.15], ['boss', 1 / 3]]) {
+test('weapon drop thresholds are 10% for normal/archer and 1/3 for bosses', () => {
+    for (const [type, threshold] of [['normal', 0.1], ['archer', 0.1], ['boss', 1 / 3]]) {
         for (const [roll, expected] of [[threshold - 1e-8, 1], [threshold, 0]]) {
             run(`game.items = []; globalThis.rolls = [${roll}, 0.5, 0.5];
                 Math.random = () => rolls.shift() ?? 0.5;
@@ -226,13 +228,13 @@ test('weapon drop thresholds are 15% for normal/archer and 1/3 for bosses', () =
         }
     }
 });
-test('all three weapons can drop and hearts use a separate 1% roll', () => {
+test('all three weapons can drop and hearts use a separate 0.5% roll', () => {
     for (const [roll, type] of [[0, 'normal'], [0.4, 'spread'], [0.9, 'laser']]) {
         run(`game.items = []; globalThis.rolls = [0, ${roll}, 0.5];
             Math.random = () => rolls.shift(); dropItems({type:'normal', x:100, y:100, w:40});`);
         assert.equal(run('game.items[0].type'), type);
     }
-    for (const [roll, expected] of [[0.009999, 1], [0.01, 0]]) {
+    for (const [roll, expected] of [[0.004999, 1], [0.005, 0]]) {
         run(`game.items = []; globalThis.rolls = [0.5, ${roll}];
             Math.random = () => rolls.shift(); dropItems({type:'normal', x:100, y:100, w:40});`);
         assert.equal(run('game.items.length'), expected);
@@ -361,24 +363,24 @@ test('bosses start at stage four, game over freezes combat, restart resets every
     listeners.pointerdown(pointer(1, 130));
     assert.equal(run('game.over'), false);
 });
-test('speed items stack up to ten and accelerate both keyboard and touch', () => {
+test('speed items stack up to sixteen and accelerate both keyboard and touch', () => {
     const distances = [];
     for (const touch of [false, true]) {
         for (const upgraded of [false, true]) {
             run('resetGame(); game.enemyCooldown = 1e6; game.player.x = 0');
-            if (upgraded) for (let i = 0; i < 12; i++) pickup('speed');
-            assert.equal(run('game.player.speedLevel'), upgraded ? 10 : 0);
+            if (upgraded) for (let i = 0; i < 20; i++) pickup('speed');
+            assert.equal(run('game.player.speedLevel'), upgraded ? 16 : 0);
             run(touch ? 'touchTarget = 336' : 'keysDown.ArrowRight = true');
             advance(0.1);
             distances.push(run('game.player.x'));
         }
     }
-    assert.ok(Math.abs(distances[1] / distances[0] - 2.2) < 1e-10);
-    assert.ok(Math.abs(distances[3] / distances[2] - 2.2) < 1e-10);
+    assert.ok(Math.abs(distances[1] / distances[0] - 1.48) < 1e-10);
+    assert.ok(Math.abs(distances[3] / distances[2] - 1.48) < 1e-10);
     assert.equal(run('game.weapon.level'), 1);
 });
 test('speed and bomb drop independently without reducing weapon drop chances', () => {
-    for (const [speed, bomb, expected] of [[0.03999, 0.5, 'speed'], [0.5, 0.02499, 'bomb'], [0.04, 0.025, '']]) {
+    for (const [speed, bomb, expected] of [[0.02999, 0.5, 'speed'], [0.5, 0.01499, 'bomb'], [0.03, 0.015, '']]) {
         run(`game.items = []; globalThis.rolls = [0.5, 0.5, ${speed}, ${bomb}];
             Math.random = () => rolls.shift(); dropItems({type:'normal', x:100, y:100, w:40});`);
         assert.equal(run('game.items.map(item => item.type).join()'), expected);
@@ -404,24 +406,32 @@ test('bomb inventory caps at five, damages visible enemies once and clears arrow
     run('game.over = true; useBomb()');
     assert.equal(run('game.bombs'), 4);
 });
-test('double space uses one bomb; holding, slow presses and a third press do not', () => {
+test('F fires one bomb per press; repeats are ignored and double space only shoots', () => {
     run('game.bombs = 5');
     listeners.keydown({...key(' '), timeStamp:100});
     listeners.keydown({...key(' '), timeStamp:150, repeat:true});
     assert.equal(run('game.bombs'), 5);
     listeners.keyup(key(' '));
     listeners.keydown({...key(' '), timeStamp:250});
-    assert.equal(run('game.bombs'), 4);
+    assert.equal(run('game.bombs'), 5);
     assert.equal(run('isFiring()'), true);
-    listeners.keyup(key(' '));
-    listeners.keydown({...key(' '), timeStamp:300});
+    listeners.keydown(key('f'));
     assert.equal(run('game.bombs'), 4);
-    listeners.keyup(key(' '));
-    listeners.keydown({...key(' '), timeStamp:650});
+    assert.equal(run('isFiring()'), true, 'F does not interrupt held fire');
+    listeners.keydown({...key('f'), repeat:true});
+    listeners.keydown(key('F'));
     assert.equal(run('game.bombs'), 4);
-    listeners.blur();
-    listeners.keydown({...key(' '), timeStamp:700});
-    assert.equal(run('game.bombs'), 4, 'blur clears partial gestures');
+    listeners.keyup(key('F'));
+    listeners.keydown(key('F'));
+    assert.equal(run('game.bombs'), 3, 'uppercase F works');
+    listeners.keyup(key('f'));
+    run('game.over = true');
+    listeners.keydown(key('f'));
+    assert.equal(run('game.bombs'), 3, 'game over prevents use');
+    listeners.keyup(key('f'));
+    run('game.over = false; game.bombs = 0');
+    listeners.keydown(key('f'));
+    assert.equal(run('game.bombs'), 0);
 });
 test('double tap uses one bomb without breaking held fire; multitouch does not trigger', () => {
     run('game.bombs = 5');
@@ -455,10 +465,10 @@ test('restart clears new inventory, speed upgrades and partially entered bomb ge
     listeners.keydown(key('Enter'));
     assert.equal(run('game.player.speedLevel'), 0);
     assert.equal(run('game.bombs'), 0);
-    assert.equal(run('lastSpacePress'), null);
+    assert.equal(run('Object.keys(keysDown).length'), 0);
     assert.equal(run('lastTap'), null);
 });
-test('mastery requires a fresh climb to ten, persists across switches and caps at two', () => {
+test('first two mastery ranks require fresh climbs to ten and persist across switches', () => {
     for (const type of ['normal', 'spread', 'laser']) {
         run('resetGame()');
         const other = type === 'normal' ? 'laser' : 'normal';
@@ -471,7 +481,7 @@ test('mastery requires a fresh climb to ten, persists across switches and caps a
         for (let i = 0; i < 20; i++) pickup(type);
         for (const support of ['heart', 'speed', 'bomb']) pickup(support);
         pickup(type);
-        assert.equal(run(`game.mastery.${type}`), 1, 'capped pickups and support items cannot grant rank two');
+        assert.equal(run(`game.mastery.${type}`), 1, 'post-ten levels and support items cannot grant rank two');
         pickup(other);
         assert.equal(run(`game.mastery.${type}`), 1);
         pickup(type);
@@ -501,35 +511,43 @@ test('thickness mastery affects spread and laser but never normal shells', () =>
         }
     }
 });
-test('split mastery gives normal/laser one, three, five branches without changing spread', () => {
+test('split mastery gives one, two, three branches; rank one removes only the center shot', () => {
     for (let rank = 0; rank <= 2; rank++) {
         run(`game.mastery.spread = ${rank}`);
         for (const level of [1, 10]) {
             run(`game.weapon = {type:'normal', level:${level}}; game.bullets = []; fireWeapon()`);
-            assert.equal(run('game.bullets.length'), 1 + 2 * rank);
+            assert.equal(run('game.bullets.length'), 1 + rank);
             assert.equal(run('game.bullets[0].vx + game.bullets.at(-1).vx'), 0);
+            assert.ok(Math.abs(run('Math.atan2(game.bullets.at(-1).vx, -game.bullets.at(-1).vy)') - (rank ? 0.22 : 0)) < 1e-10);
+            if (rank === 1) assert.equal(run('game.bullets.some(bullet => bullet.vx === 0)'), false);
             run(`game.weapon.type = 'laser'`);
-            assert.equal(run('laserBeams().length'), 1 + 2 * rank);
+            assert.equal(run('laserBeams().length'), 1 + rank);
+            assert.ok(Math.abs(run('Math.atan(laserBeams().at(-1).slope)') - (rank ? 0.22 : 0)) < 1e-10);
             run(`game.weapon.type = 'spread'; game.bullets = []; fireWeapon()`);
             assert.equal(run('game.bullets.length'), level + 2);
+            assert.ok(Math.abs(run('Math.atan2(game.bullets.at(-1).vx, -game.bullets.at(-1).vy)') - (level + 1) / 2 * 0.13) < 1e-10);
         }
     }
 });
 test('branched laser hits side targets while gaps and below-tank targets remain safe', () => {
     run(`game.mastery.spread = 1; game.weapon.type = 'laser'; keysDown[' '] = true;
-        for (const x of [115, 182, 250, 350]) Object.assign(spawnEnemy('boss'), {x, y:95, w:36, speed:0});
+        for (const x of [70, 182, 294, 350]) Object.assign(spawnEnemy('boss'), {x, y:95, w:36, speed:0});
         update(STEP);`);
-    for (let i = 0; i < 3; i++) assert.ok(run(`game.enemies[${i}].hp`) < 64);
+    for (const i of [0, 2]) assert.ok(run(`game.enemies[${i}].hp`) < 64);
+    assert.equal(run('game.enemies[1].hp'), 64, 'rank one has no central beam');
     assert.equal(run('game.enemies[3].hp'), 64);
     assert.equal(run('laserBeams().some(beam => laserHits(beam, {x:180, y:680, w:40, h:10}))'), false);
     assert.equal(run('laserBeams().some(beam => laserHits(beam, {x:155, y:95, w:10, h:10}))'), false);
 });
-test('overlapping laser branches deal damage once and ignore their own speed mastery', () => {
-    run(`game.mastery = {normal:2, spread:2, laser:2}; game.weapon.type = 'laser'; keysDown[' '] = true;
-        Object.assign(spawnEnemy('boss'), {x:0, y:300, w:400, speed:0});`);
-    advance(1);
-    assert.ok(Math.abs(run('game.enemies[0].hp') - 22) < 1e-8);
-    assert.equal(run('attackRate()'), 1);
+test('overlapping laser branches stack damage even before reflection mastery', () => {
+    for (const rank of [1, 2]) {
+        run(`resetGame(); game.enemyCooldown = 1e6;
+            game.mastery = {normal:2, spread:${rank}, laser:2}; game.weapon.type = 'laser'; keysDown[' '] = true;
+            Object.assign(spawnEnemy('boss'), {x:0, y:300, w:400, speed:0, hp:1000, maxHp:1000});`);
+        advance(1);
+        assert.ok(Math.abs(run('game.enemies[0].hp') - (1000 - 42 * (rank + 1))) < 1e-8);
+        assert.equal(run('attackRate()'), 1);
+    }
 });
 test('speed mastery increases actual normal/spread firing rate, preserving per-shot damage', () => {
     for (const type of ['normal', 'spread']) {
@@ -554,6 +572,204 @@ test('all mastery bonuses coexist but are cleared by a new game', () => {
     run('game.over = true');
     listeners.keydown(key('Enter'));
     assert.equal(run('Object.values(game.mastery).join()'), '0,0,0');
+});
+test('post-ten levels increase damage while projectile appearance and branching stay fixed', () => {
+    for (const type of ['normal', 'spread']) {
+        run(`resetGame(); game.weapon = {type:'${type}', level:10}; fireWeapon()`);
+        const base = run('game.bullets[0]');
+        const count = run('game.bullets.length');
+        for (const level of [11, 20, 100]) {
+            run(`game.weapon.level = ${level}; game.bullets = []; fireWeapon()`);
+            const upgraded = run('game.bullets[0]');
+            assert.equal(run('game.bullets.length'), count);
+            for (const property of ['w', 'h', 'vx', 'vy', 'color', 'glow']) assert.equal(upgraded[property], base[property]);
+            assert.ok(Math.abs(upgraded.damage / base.damage - (1 + (level - 10) * 0.05)) < 1e-10);
+        }
+    }
+});
+test('post-ten laser retains its beam geometry but deals increased continuous damage', () => {
+    run(`game.weapon = {type:'laser', level:10}; globalThis.baseBeams = JSON.stringify(laserBeams());
+        game.weapon.level = 20; keysDown[' '] = true;
+        Object.assign(spawnEnemy('boss'), {x:180, y:100, speed:0, hp:10000, maxHp:10000});`);
+    assert.equal(run('JSON.stringify(laserBeams())'), run('baseBeams'));
+    advance(1);
+    assert.ok(Math.abs(run('game.enemies[0].hp') - (10000 - 490 * 1.5)) < 1e-8);
+});
+test('third mastery requires switching after rank two then a fresh climb to twenty', () => {
+    for (const type of ['normal', 'spread', 'laser']) {
+        run(`resetGame(); game.weapon = {type:'${type}', level:9}`);
+        pickup(type);
+        const other = type === 'normal' ? 'spread' : 'normal';
+        pickup(other); pickup(type);
+        for (let i = 1; i < 10; i++) pickup(type);
+        assert.equal(run(`game.mastery.${type}`), 2);
+        for (let i = 10; i < 25; i++) pickup(type);
+        assert.equal(run(`game.mastery.${type}`), 2);
+        pickup(other); pickup(type);
+        for (let i = 1; i < 19; i++) pickup(type);
+        assert.equal(run(`game.mastery.${type}`), 2);
+        pickup(type);
+        assert.equal(run(`game.mastery.${type}`), 3);
+        pickup(other); pickup(type);
+        for (let i = 1; i < 25; i++) pickup(type);
+        assert.equal(run(`game.mastery.${type}`), 3);
+    }
+});
+
+test('companion uses half the equipped level and receives no mastery bonuses', () => {
+    run('game.mastery = {normal:3, spread:3, laser:3}');
+    for (const type of ['normal', 'spread', 'laser']) {
+        for (const level of [1, 2, 9, 20, 43]) {
+            run(`game.weapon = {type:'${type}', level:${level}}; game.bullets = []; fireWeapon(true)`);
+            assert.equal(run('game.bullets.length'), level === 1 ? 0 : 1);
+            if (level === 1) continue;
+            const bullet = run('game.bullets[0]');
+            assert.equal(bullet.damage, run(`attackDamage('normal', ${Math.floor(level / 2)})`));
+            assert.equal(bullet.w, run(`WEAPONS.normal.width[${Math.min(10, Math.floor(level / 2)) - 1}]`));
+            assert.equal(bullet.vx, 0);
+            assert.equal(bullet.reflects, false);
+        }
+    }
+});
+
+test('companion follows and fires with base cadence even while laser is equipped', () => {
+    run(`game.mastery = {normal:3, spread:3, laser:3}; game.weapon = {type:'laser', level:20};
+        keysDown[' '] = true; keysDown.ArrowRight = true; update(STEP)`);
+    assert.ok(run('game.companion.x') > 126);
+    assert.equal(run('game.bullets.filter(b => b.companion).length'), 1);
+    assert.equal(run('game.companion.cooldown'), run('FIRE_INTERVAL'));
+    advance(0.1);
+    assert.equal(run('game.bullets.filter(b => b.companion).length'), 1);
+    advance(0.1);
+    assert.equal(run('game.bullets.filter(b => b.companion).length'), 2);
+});
+
+test('third ranks retain the second-rank width rate and branch limits', () => {
+    run('game.mastery = {normal:3, spread:3, laser:3}');
+    assert.equal(run("attackWidth('spread', 1)"), 6);
+    assert.equal(run("attackWidth('normal', 1)"), 7);
+    assert.equal(run('attackRate()'), 1.4);
+    assert.equal(run("shotCount('normal', 20)"), 3);
+    run("game.weapon.type = 'laser'");
+    assert.equal(run('attackRate()'), 1);
+});
+
+test('split projectiles reflect inward at both side walls without changing damage', () => {
+    for (const type of ['normal', 'spread']) {
+        for (const side of ['left', 'right']) {
+            run(`game.mastery.spread = 3; game.weapon = {type:'${type}', level:10}; game.bullets = []; fireWeapon();
+                game.bullets = [game.bullets[${side === 'left' ? '0' : 'game.bullets.length - 1'}]];
+                game.bullets[0].x = ${side === 'left' ? '0' : '400 - game.bullets[0].w'};`);
+            const before = run('({...game.bullets[0]})');
+            run('update(STEP)');
+            const after = run('game.bullets[0]');
+            assert.equal(after.vx, -before.vx);
+            assert.equal(after.vy, before.vy);
+            assert.equal(after.damage, before.damage);
+            assert.ok(after.x >= 0 && after.x + after.w <= 400);
+        }
+    }
+});
+
+test('reflected laser reaches inward targets and counts each ray only once at its joint', () => {
+    run(`game.mastery.spread = 3; game.weapon.type = 'laser'; game.player.x = 0;
+        globalThis.segments = laserBeams().filter(b => b.ray === 0);`);
+    assert.equal(run('segments.length'), 2);
+    assert.equal(run('segments[0].endY'), run('segments[1].y'));
+    assert.equal(run('segments[1].x'), 0);
+    assert.equal(run('segments[0].slope'), -run('segments[1].slope'));
+    assert.equal(run('laserHits(segments[1], {x:76, y:100, w:10, h:10})'), true);
+    run(`keysDown[' '] = true; Object.assign(spawnEnemy('boss'),
+        {x:0, y:segments[1].y - 5, w:5, h:10, speed:0, hp:1000}); update(STEP)`);
+    assert.ok(Math.abs(run('game.enemies[0].hp') - (1000 - 42 / 120)) < 1e-8);
+});
+
+test('shield charges in ten seconds, absorbs a hit and recharges without stacking', () => {
+    run("game.mastery.laser = 3; game.weapon.type = 'laser'");
+    advance(9.9);
+    assert.equal(run('game.shield.active'), false);
+    advance(0.1);
+    assert.equal(run('game.shield.active'), true);
+    advance(12);
+    run('damagePlayer()');
+    assert.equal(run('game.player.hp'), 2);
+    assert.equal(run('game.shield.active'), false);
+    run('damagePlayer()');
+    assert.equal(run('game.player.hp'), 2);
+    advance(9.9);
+    assert.equal(run('game.shield.active'), false);
+    advance(0.1);
+    assert.equal(run('game.shield.active'), true);
+    run('damagePlayer(true)');
+    assert.equal(run('game.player.hp'), 1);
+    assert.equal(run('game.shield.active'), true);
+});
+
+test('enemy contact destroys enemy and consumes either one heart or the shield', () => {
+    for (const shield of [false, true]) {
+        run(`resetGame(); game.enemyCooldown = 1e6; game.shield.active = ${shield};
+            Object.assign(spawnEnemy('normal'), {x:180, y:630, speed:0}); update(STEP)`);
+        assert.equal(run('game.enemies.length'), 0);
+        assert.equal(run('game.player.hp'), shield ? 2 : 1);
+        assert.equal(run('game.shield.active'), false);
+    }
+});
+
+test('shield consumes an incoming arrow without losing a heart', () => {
+    run(`game.mastery.laser = 3; game.shield.active = true;
+        game.arrows.push({x:196, y:620, w:8, h:26}); update(STEP)`);
+    assert.equal(run('game.arrows.length'), 0);
+    assert.equal(run('game.player.hp'), 2);
+    assert.equal(run('game.shield.active'), false);
+    assert.equal(run('game.shield.cooldown'), 10);
+});
+
+test('new game clears third-rank abilities and unlock eligibility', () => {
+    run(`game.mastery = {normal:3, spread:3, laser:3}; game.shield.active = true;
+        game.thirdMasteryReady.normal = true; resetGame()`);
+    assert.equal(run('Object.values(game.mastery).join()'), '0,0,0');
+    assert.equal(run('Object.values(game.thirdMasteryReady).some(Boolean)'), false);
+    assert.equal(run('game.shield.active'), false);
+    assert.equal(run('game.shield.cooldown'), 10);
+    assert.equal(run('game.companion.cooldown'), 0);
+});
+test('difficulty reaches old limits at thirty and doubled intensity at one hundred', () => {
+    const cases = [
+        ["enemyStats('normal').speed", 100, 180, 360],
+        ["enemyStats('archer').speed", 65, 117, 234],
+        ["enemyStats('boss').speed", 60, 108, 216],
+        ['enemyInterval()', 0.9, 0.34, 0.17],
+        ['bossInterval()', 5, 2.8, 1.4],
+        ['archerChance()', 0.215, 0.4, 0.4],
+        ['arrowInterval()', 3.72, 1.8, 0.9],
+        ['arrowSpeed()', 252, 370, 740],
+    ];
+    for (const [expression, initial, at30, at100] of cases) {
+        let previous = initial;
+        for (let stage = 1; stage <= 101; stage++) {
+            run(`game.stage = ${stage}`);
+            const actual = run(expression);
+            assert.ok((actual - previous) * Math.sign(at100 - initial) >= -1e-10, expression);
+            previous = actual;
+            const expected = new Map([[1, initial], [30, at30], [65, (at30 + at100) / 2], [100, at100], [101, at100]]).get(stage);
+            if (expected !== undefined) assert.ok(Math.abs(actual - expected) < 1e-10, `${expression} at ${stage}`);
+        }
+        run('game.stage = 500');
+        assert.ok(Math.abs(run(expression) - at100) < 1e-10);
+    }
+});
+
+test('late-stage spawn timers and arrow movement use the new difficulty limits', () => {
+    run(`game.stage = 100; Math.random = () => 0.39;
+        game.enemyCooldown = 0; game.bossCooldown = 0; update(STEP)`);
+    assert.equal(run('game.enemies.map(e => e.type).join()'), 'archer,boss');
+    assert.equal(run('game.enemies[0].speed'), 234);
+    assert.equal(run('game.enemies[1].speed'), 216);
+    assert.ok(Math.abs(run('game.enemyCooldown + STEP') - 0.17) < 1e-10);
+    assert.ok(Math.abs(run('game.bossCooldown + STEP') - 1.4) < 1e-10);
+    run(`Object.assign(game.enemies[0], {y:100, speed:0, shootCooldown:0}); update(STEP)`);
+    assert.equal(run('game.enemies[0].shootCooldown'), 0.9);
+    assert.ok(Math.abs(run('game.arrows[0].y') - (138 + 740 / 120)) < 1e-10);
 });
 console.log(`\n${passed} logic checks passed (no screen validation).`);
 

@@ -12,22 +12,24 @@ const WEAPONS = {
     spread: { name: "갈래 포탄", icon: "S", color: "#8df49e", damage: [4, 6, 8, 10, 12, 14, 16, 18, 20, 22], width: [4, 4.3, 4.6, 4.9, 5.2, 5.5, 5.8, 6.1, 6.4, 6.7] },
     laser: { name: "레이저 포", icon: "L", color: "#71dbff", damage: [42, 70, 105, 145, 190, 240, 295, 355, 420, 490], width: [6, 10, 15, 22, 30, 39, 49, 60, 72, 86] },
 };
-const LEVEL_COLORS = ["#ffe080", "#69e9ff", "#c89aff", "#ff708e", "#ffad66", "#b0ef72", "#50edc9", "#769bff", "#ef8dff", "#fff4dc"];
+const LEVEL_COLORS = ["#ffe080", "#69e9ff", "#c89aff", "#ff708e", "#ffad66", "#b0ef72", "#50edc9", "#769bff", "#ef8dff", "#ffc04d"];
 const SUPPORT_ITEMS = {
     heart: { icon: "♥", color: "#ff708e" },
     speed: { icon: "»", color: "#a4f878" },
     bomb: { icon: "B", color: "#ffb36b" },
 };
-const MAX_WEAPON_LEVEL = 10;
-const MAX_SPEED_LEVEL = 10;
+const WEAPON_MILESTONE = 10; // 외형과 달성 보너스 기준. 실제 무기 레벨에는 상한이 없다.
+const EXTRA_LEVEL_DAMAGE = 0.05;
+const MAX_SPEED_LEVEL = 16;
 const MAX_BOMBS = 5;
 const DOUBLE_PRESS_MS = 300;
+const BONUS_BRANCH_ANGLE = 0.22;
 const ENEMIES = {
-    normal: { hp: 8, hpGrowth: 2, speed: 100, size: 36, score: 1 },
-    archer: { hp: 12, hpGrowth: 2, speed: 65, size: 38, score: 2 },
-    boss: { hp: 64, hpGrowth: 6, speed: 60, size: 60, score: 3 },
+    normal: { hp: 8, speed: 100, size: 36, score: 1 },
+    archer: { hp: 12, speed: 65, size: 38, score: 2 },
+    boss: { hp: 64, speed: 60, size: 60, score: 3 },
 };
-const HEART_DROP_RATE = 0.01;
+const HEART_DROP_RATE = 0.005;
 const MAX_HEARTS = 5;
 const FIRE_INTERVAL = 0.18;
 const STEP = 1 / 120;
@@ -41,7 +43,6 @@ let touchTarget = null;
 let autoFire = false;
 let lastTime = null;
 let accumulator = 0;
-let lastSpacePress = null;
 let lastTap = null;
 let touchGesture = null;
 
@@ -52,6 +53,9 @@ function resetGame() {
         bombs: 0, bombFlash: 0,
         weapon: { type: "normal", level: 1 },
         mastery: { normal: 0, spread: 0, laser: 0 },
+        thirdMasteryReady: { normal: false, spread: false, laser: false },
+        companion: { x: 126, y: 628, cooldown: 0 },
+        shield: { active: false, cooldown: 10 },
         bullets: [], enemies: [], arrows: [], items: [], particles: [],
         fireCooldown: 0, enemyCooldown: 0.8, bossCooldown: 5,
         laserActive: false, flash: 0,
@@ -67,20 +71,32 @@ function clearInput() {
     keysDown = {};
     touchPointer = null;
     touchTarget = null;
-    lastSpacePress = null;
     lastTap = null;
     touchGesture = null;
     if (game) game.laserActive = false;
 }
 
-function enemyInterval() { return Math.max(0.34, 0.9 - (game.stage - 1) * 0.045); }
-function bossInterval() { return Math.max(2.8, 5 - (game.stage - 4) * 0.15); }
+// 30스테이지에 기존 제한값, 100스테이지에 새 제한값 도달 후 유지한다.
+function stageValue(initial, at30, at100, startStage = 1) {
+    if (game.stage <= 30) {
+        const progress = Math.max(0, (game.stage - startStage) / (30 - startStage));
+        return initial + (at30 - initial) * progress;
+    }
+    return at30 + (at100 - at30) * Math.min(1, (game.stage - 30) / 70);
+}
+
+function enemyInterval() { return stageValue(0.9, 0.34, 0.17); }
+function bossInterval() { return stageValue(5, 2.8, 1.4, 4); }
+function archerChance() { return stageValue(0.215, 0.4, 0.4); }
+function arrowInterval() { return stageValue(3.72, 1.8, 0.9); }
+function arrowSpeed() { return stageValue(252, 370, 740); }
 
 function enemyStats(type) {
     const base = ENEMIES[type];
     return {
-        hp: base.hp + base.hpGrowth * (game.stage - 1),
-        speed: Math.min(base.speed * 1.8, base.speed + (game.stage - 1) * 4),
+        // 1~9스테이지는 고정, 10부터 직전 스테이지 체력의 1.5%씩 복리 증가.
+        hp: base.hp * 1.015 ** Math.max(0, game.stage - 9),
+        speed: stageValue(base.speed, base.speed * 1.8, base.speed * 3.6),
     };
 }
 
@@ -103,7 +119,7 @@ function spawnEnemy(type) {
     const enemy = {
         type, x: Math.random() * (canvas.width - base.size), y: -base.size,
         w: base.size, h: base.size, hp: stats.hp, maxHp: stats.hp,
-        speed: stats.speed, shootCooldown: 1.3 + Math.random() * 0.7, hitFlash: 0,
+        speed: stats.speed, shootCooldown: (1.3 + Math.random() * 0.7) * 2, hitFlash: 0,
     };
     game.enemies.push(enemy);
     return enemy;
@@ -127,15 +143,15 @@ function addItem(type, x, y) {
 }
 
 function dropItems(enemy) {
-    const chance = enemy.type === "boss" ? 1 / 3 : 0.15;
+    const chance = enemy.type === "boss" ? 1 / 3 : 0.1;
     if (Math.random() < chance) {
         const type = Object.keys(WEAPONS)[Math.floor(Math.random() * 3)];
         addItem(type, enemy.x + enemy.w / 2 - 28, enemy.y);
     }
     // 하트는 무기 드랍과 별도로 추첨한다.
     if (Math.random() < HEART_DROP_RATE) addItem("heart", enemy.x + enemy.w / 2, enemy.y);
-    if (Math.random() < 0.04) addItem("speed", enemy.x, enemy.y - 32);
-    if (Math.random() < 0.025) addItem("bomb", enemy.x + enemy.w / 2, enemy.y - 64);
+    if (Math.random() < 0.03) addItem("speed", enemy.x, enemy.y - 32);
+    if (Math.random() < 0.015) addItem("bomb", enemy.x + enemy.w / 2, enemy.y - 64);
 }
 
 function damageEnemy(enemy, damage) {
@@ -157,6 +173,13 @@ function damageEnemy(enemy, damage) {
 function damagePlayer(escaped = false) {
     const player = game.player;
     if (game.over || (!escaped && player.invulnerable > 0)) return;
+    if (!escaped && game.shield.active) {
+        game.shield.active = false;
+        game.shield.cooldown = 10;
+        player.invulnerable = 1.2;
+        burst(player.x + 32, player.y + 32, "#71dbff");
+        return;
+    }
     player.hp = Math.max(0, player.hp - 1);
     player.invulnerable = 1.2;
     game.flash = 0.2;
@@ -180,11 +203,21 @@ function collectItem(item) {
     } else {
         const weapon = game.weapon;
         const previousLevel = weapon.level;
-        weapon.level = weapon.type === item.type ? Math.min(MAX_WEAPON_LEVEL, weapon.level + 1) : 1;
+        if (weapon.type !== item.type && game.mastery[weapon.type] === 2) {
+            game.thirdMasteryReady[weapon.type] = true;
+        }
+        weapon.level = weapon.type === item.type ? weapon.level + 1 : 1;
         weapon.type = item.type;
         // 9→10을 새로 달성할 때만 지급. 다시 받으려면 무기 교체로 1단계부터 쌓아야 한다.
-        if (previousLevel < MAX_WEAPON_LEVEL && weapon.level === MAX_WEAPON_LEVEL) {
-            game.mastery[item.type] = Math.min(2, game.mastery[item.type] + 1);
+        if (previousLevel < WEAPON_MILESTONE && weapon.level === WEAPON_MILESTONE && game.mastery[item.type] < 2) {
+            game.mastery[item.type]++;
+        }
+        if (weapon.level === 20 && previousLevel === 19 && game.mastery[item.type] === 2 && game.thirdMasteryReady[item.type]) {
+            game.mastery[item.type] = 3;
+            if (item.type === "normal") {
+                game.companion.x = Math.max(0, game.player.x - 42);
+                game.companion.y = game.player.y + 18;
+            }
         }
         game.fireCooldown = 0;
     }
@@ -208,29 +241,52 @@ function useBomb() {
 function isFiring() { return !game.over && (keysDown[" "] || touchPointer !== null || autoFire); }
 
 function attackWidth(type, level) {
-    return WEAPONS[type].width[level - 1] * (1 + (type === "normal" ? 0 : game.mastery.normal * 0.25));
+    return WEAPONS[type].width[Math.min(level, WEAPON_MILESTONE) - 1] * (1 + (type === "normal" ? 0 : Math.min(2, game.mastery.normal) * 0.25));
+}
+
+function attackDamage(type, level) {
+    return WEAPONS[type].damage[Math.min(level, WEAPON_MILESTONE) - 1] *
+        (1 + Math.max(0, level - WEAPON_MILESTONE) * EXTRA_LEVEL_DAMAGE);
 }
 
 function attackRate() {
-    return 1 + (game.weapon.type === "laser" ? 0 : game.mastery.laser * 0.2);
+    return 1 + (game.weapon.type === "laser" ? 0 : Math.min(2, game.mastery.laser) * 0.2);
 }
 
 function shotCount(type, level) {
-    return type === "spread" ? level + 2 : 1 + game.mastery.spread * 2;
+    return type === "spread" ? Math.min(level, WEAPON_MILESTONE) + 2 : 1 + Math.min(2, game.mastery.spread);
+}
+
+function shotAngle(type, count, index) {
+    if (type !== "spread" && count === 2) return (index === 0 ? -1 : 1) * BONUS_BRANCH_ANGLE;
+    return (index - (count - 1) / 2) * (type === "spread" ? 0.13 : BONUS_BRANCH_ANGLE);
 }
 
 // 그리기와 충돌 판정에 같은 레이저 형상을 사용한다.
 function laserBeams() {
     const count = shotCount("laser", game.weapon.level);
-    return Array.from({ length: count }, (_, i) => ({
-        x: game.player.x + 32, y: game.player.y,
-        slope: Math.tan((i - (count - 1) / 2) * 0.13),
-        width: attackWidth("laser", game.weapon.level),
-    }));
+    const beams = [];
+    for (let ray = 0; ray < count; ray++) {
+        let x = game.player.x + 32;
+        let y = game.player.y;
+        let slope = Math.tan(shotAngle("laser", count, ray));
+        while (y > 0) {
+            const wall = slope > 0 ? canvas.width : 0;
+            const distance = slope === 0 ? Infinity : (wall - x) / slope;
+            const reflects = game.mastery.spread >= 3 && distance > 0 && distance < y;
+            const endY = reflects ? y - distance : 0;
+            beams.push({ x, y, slope, endY, ray, width: attackWidth("laser", game.weapon.level) });
+            if (!reflects) break;
+            x = wall;
+            y = endY;
+            slope = -slope;
+        }
+    }
+    return beams;
 }
 
 function laserHits(beam, enemy) {
-    const top = Math.max(0, enemy.y);
+    const top = Math.max(beam.endY, enemy.y);
     const bottom = Math.min(beam.y, enemy.y + enemy.h);
     if (bottom <= top) return false;
     const x1 = beam.x + (beam.y - top) * beam.slope;
@@ -239,32 +295,112 @@ function laserHits(beam, enemy) {
         Math.max(x1, x2) + beam.width / 2 > enemy.x;
 }
 
-function drawBeam(beam, width, color) {
+function drawBeam(beam, color) {
     const topX = beam.x + beam.y * beam.slope;
-    ctx.fillStyle = color;
+    const width = beam.width;
+    const length = beam.y - beam.endY;
+    ctx.save();
+    // 광선 기울기에 맞춰 색의 단면과 흐름도 함께 변형한다. 판정 너비는 그대로다.
+    ctx.transform(1, 0, -beam.slope, 1, topX, 0);
+    const glow = ctx.createLinearGradient(-width * 0.7, 0, width * 0.7, 0);
+    glow.addColorStop(0, "transparent");
+    glow.addColorStop(0.3, color);
+    glow.addColorStop(0.7, color);
+    glow.addColorStop(1, "transparent");
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = glow;
+    ctx.fillRect(-width * 0.7, beam.endY, width * 1.4, length);
+    const body = ctx.createLinearGradient(-width / 2, 0, width / 2, 0);
+    body.addColorStop(0, "transparent");
+    body.addColorStop(0.18, color);
+    body.addColorStop(0.5, color);
+    body.addColorStop(0.82, color);
+    body.addColorStop(1, "transparent");
+    ctx.globalAlpha = 0.65 + Math.sin(game.time * 18) * 0.06;
+    ctx.fillStyle = body;
+    ctx.fillRect(-width / 2, beam.endY, width, length);
+    ctx.globalAlpha = 0.85;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    ctx.strokeStyle = "#fff2ce";
+    ctx.lineWidth = Math.min(3, width * 0.12);
     ctx.beginPath();
-    ctx.moveTo(beam.x - width / 2, beam.y);
-    ctx.lineTo(topX - width / 2, 0);
-    ctx.lineTo(topX + width / 2, 0);
-    ctx.lineTo(beam.x + width / 2, beam.y);
-    ctx.closePath();
-    ctx.fill();
+    ctx.moveTo(0, beam.y);
+    ctx.lineTo(0, beam.endY);
+    ctx.stroke();
+    // 짧은 에너지 파동이 포구에서 위로 흐른다.
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.22;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 6; i++) {
+        const y = beam.y - (game.time * 440 + i * length / 6) % length;
+        ctx.beginPath();
+        ctx.moveTo(-width * 0.3, y + 9);
+        ctx.quadraticCurveTo(0, y - 7, width * 0.3, y + 9);
+        ctx.stroke();
+    }
+    ctx.restore();
 }
 
-function fireWeapon() {
-    const { type, level } = game.weapon;
-    if (type === "laser") return;
-    const spec = WEAPONS[type];
-    const count = shotCount(type, level);
+function drawBullet(bullet) {
+    ctx.save();
+    ctx.translate(bullet.x + bullet.w / 2, bullet.y + bullet.h / 2);
+    ctx.rotate(Math.atan2(bullet.vx, -bullet.vy));
+    const w = bullet.w;
+    const h = bullet.h;
+    if (bullet.type === "normal") {
+        const tailLength = h * (1.5 + 0.15 * Math.sin(game.time * 25 + bullet.y));
+        const tail = ctx.createLinearGradient(0, h * 0.15, 0, h / 2 + tailLength);
+        tail.addColorStop(0, bullet.color);
+        tail.addColorStop(0.35, bullet.color + "99");
+        tail.addColorStop(1, "transparent");
+        ctx.fillStyle = tail;
+        ctx.beginPath();
+        ctx.moveTo(-w * 0.35, h * 0.15);
+        ctx.quadraticCurveTo(-w * 0.25, h, 0, h / 2 + tailLength);
+        ctx.quadraticCurveTo(w * 0.25, h, w * 0.35, h * 0.15);
+        ctx.fill();
+        const body = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
+        body.addColorStop(0, bullet.color);
+        body.addColorStop(0.3, "#fff0c5");
+        body.addColorStop(0.48, bullet.color);
+        body.addColorStop(1, "#6b392d");
+        ctx.fillStyle = body;
+        ctx.shadowColor = bullet.color;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.moveTo(0, -h / 2);
+        ctx.bezierCurveTo(w * 0.65, -h * 0.35, w * 0.55, h * 0.5, 0, h * 0.5);
+        ctx.bezierCurveTo(-w * 0.55, h * 0.5, -w * 0.65, -h * 0.35, 0, -h / 2);
+        ctx.fill();
+    } else {
+        ctx.fillStyle = bullet.color;
+        ctx.shadowColor = bullet.color;
+        ctx.shadowBlur = bullet.glow;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+function fireWeapon(companion = false) {
+    const type = companion ? "normal" : game.weapon.type;
+    const level = companion ? Math.floor(game.weapon.level / 2) : game.weapon.level;
+    if (type === "laser" || level < 1) return;
+    const visualLevel = Math.min(level, WEAPON_MILESTONE);
+    const count = companion ? 1 : shotCount(type, level);
     for (let i = 0; i < count; i++) {
-        const angle = (i - (count - 1) / 2) * 0.13;
-        const width = attackWidth(type, level);
+        const angle = shotAngle(type, count, i);
+        const width = companion ? WEAPONS.normal.width[visualLevel - 1] : attackWidth(type, level);
         game.bullets.push({
-            x: game.player.x + 32 - width / 2, y: game.player.y - 18,
-            w: width, h: type === "spread" ? 18 + level * 0.5 : 18 + level * 2,
+            type, companion, reflects: !companion && game.mastery.spread >= 3 && count > 1,
+            x: (companion ? game.companion.x + 16 : game.player.x + 32) - width / 2,
+            y: (companion ? game.companion.y : game.player.y) - 18,
+            w: width, h: type === "spread" ? 18 + visualLevel * 0.5 : 18 + visualLevel * 2,
             vx: Math.sin(angle) * 600, vy: -Math.cos(angle) * 600,
-            damage: spec.damage[level - 1],
-            color: type === "spread" ? `hsl(140, 60%, ${62 + level}%)` : LEVEL_COLORS[level - 1],
+            damage: attackDamage(type, level),
+            color: type === "spread" ? `hsl(140, 60%, ${62 + visualLevel}%)` : LEVEL_COLORS[visualLevel - 1],
             glow: type === "spread" ? 3 : 9, alive: true,
         });
     }
@@ -277,7 +413,7 @@ function update(dt) {
     player.invulnerable = Math.max(0, player.invulnerable - dt);
     game.flash = Math.max(0, game.flash - dt);
     game.bombFlash = Math.max(0, game.bombFlash - dt);
-    const speedMultiplier = 1 + player.speedLevel * 0.12;
+    const speedMultiplier = 1 + player.speedLevel * 0.03;
     if (touchTarget !== null) {
         const distance = 420 * speedMultiplier * dt;
         player.x += Math.max(-distance, Math.min(distance, touchTarget - player.x));
@@ -285,10 +421,28 @@ function update(dt) {
         player.x += ((keysDown.ArrowRight ? 1 : 0) - (keysDown.ArrowLeft ? 1 : 0)) * 360 * speedMultiplier * dt;
     }
     player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
+    if (game.mastery.laser >= 3 && !game.shield.active) {
+        game.shield.cooldown = Math.max(0, game.shield.cooldown - dt);
+        if (game.shield.cooldown <= 1e-9) {
+            game.shield.cooldown = 0;
+            game.shield.active = true;
+        }
+    }
+    if (game.mastery.normal >= 3) {
+        const targetX = player.x >= 42 ? player.x - 42 : player.x + player.w + 10;
+        const companion = game.companion;
+        companion.x += (targetX - companion.x) * (1 - Math.exp(-8 * dt));
+        companion.y = player.y + 18;
+        companion.cooldown = Math.max(0, companion.cooldown - dt);
+        if (isFiring() && companion.cooldown === 0 && game.weapon.level >= 2) {
+            fireWeapon(true);
+            companion.cooldown = FIRE_INTERVAL;
+        }
+    }
 
     game.enemyCooldown -= dt;
     if (game.enemyCooldown <= 0) {
-        spawnEnemy(Math.random() < Math.min(0.4, 0.2 + game.stage * 0.015) ? "archer" : "normal");
+        spawnEnemy(Math.random() < archerChance() ? "archer" : "normal");
         game.enemyCooldown += enemyInterval();
     }
     if (game.stage >= 4) {
@@ -314,6 +468,15 @@ function update(dt) {
     for (const bullet of game.bullets) {
         bullet.x += bullet.vx * dt;
         bullet.y += bullet.vy * dt;
+        if (bullet.reflects) {
+            if (bullet.x < 0) {
+                bullet.x = -bullet.x;
+                bullet.vx = Math.abs(bullet.vx);
+            } else if (bullet.x + bullet.w > canvas.width) {
+                bullet.x = 2 * (canvas.width - bullet.w) - bullet.x;
+                bullet.vx = -Math.abs(bullet.vx);
+            }
+        }
         for (const enemy of targets) {
             if (enemy.hp > 0 && overlaps(bullet, enemy)) {
                 damageEnemy(enemy, bullet.damage);
@@ -325,12 +488,12 @@ function update(dt) {
     }
     game.bullets = game.bullets.filter(bullet => bullet.alive);
     if (game.laserActive) {
-        const spec = WEAPONS.laser;
-        const index = game.weapon.level - 1;
+        const damage = attackDamage("laser", game.weapon.level);
         const beams = laserBeams();
         for (const enemy of game.enemies) {
-            // 겹친 광선으로 단일 대상 피해가 중복되지 않도록 범위만 확장한다.
-            if (enemy.hp > 0 && beams.some(beam => laserHits(beam, enemy))) damageEnemy(enemy, spec.damage[index] * dt);
+            // 서로 다른 광선은 중첩 피해. 같은 광선의 반사 연결점은 한 번만 센다.
+            const hits = new Set(beams.filter(beam => laserHits(beam, enemy)).map(beam => beam.ray)).size;
+            if (enemy.hp > 0 && hits > 0) damageEnemy(enemy, damage * dt * hits);
         }
     }
 
@@ -348,14 +511,14 @@ function update(dt) {
             enemy.shootCooldown -= dt;
             if (enemy.shootCooldown <= 0) {
                 game.arrows.push({ x: enemy.x + enemy.w / 2 - 4, y: enemy.y + enemy.h, w: 8, h: 26 });
-                enemy.shootCooldown = Math.max(0.9, 1.9 - game.stage * 0.04);
+                enemy.shootCooldown = arrowInterval();
             }
         }
         if (game.over) return;
     }
     game.enemies = game.enemies.filter(enemy => enemy.hp > 0);
     for (const arrow of game.arrows) {
-        arrow.y += Math.min(370, 245 + game.stage * 7) * dt;
+        arrow.y += arrowSpeed() * dt;
         if (overlaps(arrow, hitbox)) {
             arrow.y = canvas.height + 1;
             damagePlayer();
@@ -364,7 +527,7 @@ function update(dt) {
     }
     game.arrows = game.arrows.filter(arrow => arrow.y <= canvas.height);
     for (const item of game.items) {
-        item.y += 95 * dt;
+        item.y += 110 * dt;
         if (overlaps(item, player)) {
             collectItem(item);
             item.y = canvas.height + 1;
@@ -446,19 +609,11 @@ function render() {
     }
     ctx.save();
     for (const bullet of game.bullets) {
-        ctx.fillStyle = bullet.color;
-        ctx.shadowColor = bullet.color;
-        ctx.shadowBlur = bullet.glow;
-        ctx.fillRect(bullet.x, bullet.y, bullet.w, bullet.h);
-        ctx.fillStyle = "#fff7df";
-        ctx.fillRect(bullet.x + bullet.w * 0.3, bullet.y, bullet.w * 0.4, bullet.h * 0.6);
+        drawBullet(bullet);
     }
     if (game.laserActive && isFiring()) {
-        ctx.shadowColor = LEVEL_COLORS[game.weapon.level - 1];
-        ctx.shadowBlur = 18;
         for (const beam of laserBeams()) {
-            drawBeam(beam, beam.width, LEVEL_COLORS[game.weapon.level - 1]);
-            drawBeam(beam, beam.width * 0.32, "#fff");
+            drawBeam(beam, LEVEL_COLORS[Math.min(game.weapon.level, WEAPON_MILESTONE) - 1]);
         }
     }
     ctx.restore();
@@ -493,6 +648,22 @@ function render() {
     ctx.globalAlpha = player.invulnerable > 0 && Math.floor(game.time * 14) % 2 ? 0.35 : 1;
     drawSprite("tank", player.x, player.y, player.w, player.h, "#cfe9ee");
     ctx.globalAlpha = 1;
+    if (game.mastery.normal >= 3) {
+        drawSprite("tank", game.companion.x, game.companion.y, 32, 32, "#cfe9ee");
+    }
+    if (game.shield.active) {
+        ctx.save();
+        ctx.strokeStyle = "#8deaff";
+        ctx.fillStyle = "rgba(100, 215, 255, .12)";
+        ctx.shadowColor = "#71dbff";
+        ctx.shadowBlur = 12;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(player.x + 32, player.y + 32, 43, 43, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+    }
     for (const particle of game.particles) {
         ctx.globalAlpha = Math.max(0, particle.life / 0.45);
         ctx.fillStyle = particle.color;
@@ -522,6 +693,9 @@ function render() {
     ctx.fillStyle = "#ffb36b";
     ctx.textAlign = "right";
     ctx.fillText(`B × ${game.bombs}`, 386, 688);
+    ctx.textAlign = "center";
+    ctx.fillStyle = WEAPONS[game.weapon.type].color;
+    ctx.fillText(`${WEAPONS[game.weapon.type].icon} × ${game.weapon.level}`, 200, 688);
     ctx.restore();
     ctx.textAlign = "center";
     if (game.flash > 0 && !game.over) {
@@ -572,7 +746,7 @@ function drawMasteryIcons() {
         ctx.stroke();
         ctx.font = "bold 12px Arial";
         ctx.textAlign = "left";
-        ctx.fillText(rank === 1 ? "I" : "II", x + 20, 53);
+        ctx.fillText("I".repeat(rank), x + 20, 53);
         x += 46;
     }
     ctx.restore();
@@ -625,16 +799,16 @@ canvas.addEventListener("pointercancel", stopTouch);
 canvas.addEventListener("lostpointercapture", stopTouch);
 document.addEventListener("keydown", function (event) {
     if (["ArrowLeft", "ArrowRight", " ", "Enter"].includes(event.key)) event.preventDefault();
-    if (!game.over && event.key === " " && !event.repeat && !keysDown[" "]) {
-        if (lastSpacePress !== null && event.timeStamp - lastSpacePress <= DOUBLE_PRESS_MS) {
-            useBomb();
-            lastSpacePress = null;
-        } else lastSpacePress = event.timeStamp;
+    if (event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        if (!event.repeat && !keysDown.f) useBomb();
+        keysDown.f = true;
+        return;
     }
     if (game.over && event.key === "Enter") resetGame();
     else keysDown[event.key] = true;
 });
-document.addEventListener("keyup", function (event) { delete keysDown[event.key]; });
+document.addEventListener("keyup", function (event) { delete keysDown[event.key.toLowerCase() === "f" ? "f" : event.key]; });
 window.addEventListener("blur", clearInput);
 document.addEventListener("visibilitychange", function () {
     clearInput();
